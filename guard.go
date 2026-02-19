@@ -1,0 +1,181 @@
+package sdk
+
+import (
+	"bytes"
+	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"encoding/pem"
+	"fmt"
+	"net/http"
+	"os"
+	"sync"
+	"time"
+)
+
+type Guard struct {
+	cfg         Config
+	publicKey   ed25519.PublicKey
+	fingerprint *Fingerprint
+	sm          *stateMachine
+	httpClient  *http.Client
+
+	version         string
+	managedVersions map[string]string
+
+	cancel context.CancelFunc
+	mu     sync.RWMutex
+}
+
+func New(cfg Config) (*Guard, error) {
+	cfg.setDefaults()
+
+	if cfg.ServerURL == "" {
+		return nil, fmt.Errorf("server_url is required")
+	}
+	if cfg.LicenseKey == "" {
+		return nil, fmt.Errorf("license_key is required")
+	}
+	if cfg.PublicKeyPEM == nil {
+		return nil, fmt.Errorf("public_key_pem is required")
+	}
+	if cfg.ProjectSlug == "" {
+		return nil, fmt.Errorf("project_slug is required")
+	}
+	if cfg.ComponentSlug == "" {
+		return nil, fmt.Errorf("component_slug is required")
+	}
+
+	block, _ := pem.Decode(cfg.PublicKeyPEM)
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode public key PEM")
+	}
+	if len(block.Bytes) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("invalid ed25519 public key size: got %d, want %d", len(block.Bytes), ed25519.PublicKeySize)
+	}
+	pubKey := ed25519.PublicKey(block.Bytes)
+
+	fp, err := collectFingerprint()
+	if err != nil {
+		return nil, fmt.Errorf("collect fingerprint: %w", err)
+	}
+
+	managedVersions := make(map[string]string, len(cfg.ManagedComponents))
+	for _, mc := range cfg.ManagedComponents {
+		managedVersions[mc.Slug] = "unknown"
+	}
+
+	return &Guard{
+		cfg:             cfg,
+		publicKey:       pubKey,
+		fingerprint:     fp,
+		sm:              newStateMachine(),
+		httpClient:      &http.Client{Timeout: 30 * time.Second},
+		version:         "unknown",
+		managedVersions: managedVersions,
+	}, nil
+}
+
+func (g *Guard) Start(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	g.cancel = cancel
+
+	if err := g.verifyLicense(); err != nil {
+		cancel()
+		return fmt.Errorf("license verification failed: %w", err)
+	}
+	g.sm.OnVerifySuccess()
+
+	g.startHeartbeat(ctx)
+
+	return nil
+}
+
+func (g *Guard) Stop() {
+	if g.cancel != nil {
+		g.cancel()
+	}
+}
+
+func (g *Guard) Check() error {
+	switch g.sm.Current() {
+	case StateActive, StateGrace:
+		return nil
+	case StateLocked:
+		return ErrLocked
+	case StateBanned:
+		return ErrBanned
+	case StateInit:
+		return ErrNotActivated
+	default:
+		return ErrNotActivated
+	}
+}
+
+func (g *Guard) State() State {
+	return g.sm.Current()
+}
+
+func (g *Guard) SetVersion(v string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.version = v
+}
+
+func (g *Guard) SetManagedVersion(slug, version string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.managedVersions[slug] = version
+}
+
+// postJSON sends a JSON POST request to the server and decodes the response.
+func (g *Guard) postJSON(path string, body any, result any) error {
+	data, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshal request: %w", err)
+	}
+
+	url := g.cfg.ServerURL + path
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := g.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%w: status %d", ErrInvalidServerResponse, resp.StatusCode)
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
+	}
+
+	return nil
+}
+
+func randomNonce() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+func nowUnix() int64 {
+	return time.Now().Unix()
+}
+
+func nowRFC3339() string {
+	return time.Now().Format(time.RFC3339)
+}
+
+func hostname() string {
+	h, _ := os.Hostname()
+	return h
+}
