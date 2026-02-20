@@ -22,10 +22,15 @@ type GracePolicy struct {
 }
 
 type OTAConfig struct {
-	Enabled       bool
-	AutoUpdate    bool
-	CheckInterval time.Duration
-	Platform      string
+	Enabled            bool
+	AutoUpdate         bool
+	CheckInterval      time.Duration
+	Platform           string
+	DownloadTimeout    time.Duration
+	MaxArtifactBytes   int64
+	OnUpdateProgress   func(component, stage string, progress float64)
+	OnUpdateResult     func(component, oldVer, newVer string, success bool, err error)
+	OnUpdateFailure    func(component string, err error)
 }
 
 type UpdateStrategy int
@@ -57,5 +62,11 @@ func (c *Config) setDefaults() {
 	}
 	if c.OTA.Platform == "" {
 		c.OTA.Platform = "universal"
+	}
+	if c.OTA.DownloadTimeout == 0 {
+		c.OTA.DownloadTimeout = 10 * time.Minute
+	}
+	if c.OTA.MaxArtifactBytes == 0 {
+		c.OTA.MaxArtifactBytes = 500 * 1024 * 1024 // 500MB
 	}
 }

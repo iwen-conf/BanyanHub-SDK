@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"sync"
@@ -25,8 +27,10 @@ type Guard struct {
 	version         string
 	managedVersions map[string]string
 
-	cancel context.CancelFunc
-	mu     sync.RWMutex
+	cancel   context.CancelFunc
+	mu       sync.RWMutex
+	updateMu sync.Mutex
+	logger   *slog.Logger
 }
 
 func New(cfg Config) (*Guard, error) {
@@ -75,6 +79,7 @@ func New(cfg Config) (*Guard, error) {
 		httpClient:      &http.Client{Timeout: 30 * time.Second},
 		version:         "unknown",
 		managedVersions: managedVersions,
+		logger:          slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}, nil
 }
 
@@ -130,15 +135,23 @@ func (g *Guard) SetManagedVersion(slug, version string) {
 	g.managedVersions[slug] = version
 }
 
+func (g *Guard) SetLogger(logger *slog.Logger) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if logger != nil {
+		g.logger = logger
+	}
+}
+
 // postJSON sends a JSON POST request to the server and decodes the response.
-func (g *Guard) postJSON(path string, body any, result any) error {
+func (g *Guard) postJSON(ctx context.Context, path string, body any, result any) error {
 	data, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("marshal request: %w", err)
 	}
 
 	url := g.cfg.ServerURL + path
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}

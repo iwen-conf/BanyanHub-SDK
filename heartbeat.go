@@ -47,17 +47,26 @@ func (g *Guard) startHeartbeat(ctx context.Context) {
 }
 
 func (g *Guard) sendHeartbeat() error {
+	// Snapshot version info under lock to avoid race
+	g.mu.RLock()
+	currentVersion := g.version
+	managedVersionsSnapshot := make(map[string]string, len(g.managedVersions))
+	for k, v := range g.managedVersions {
+		managedVersionsSnapshot[k] = v
+	}
+	g.mu.RUnlock()
+
 	components := []map[string]string{
 		{
 			"slug":    g.cfg.ComponentSlug,
-			"version": g.version,
+			"version": currentVersion,
 		},
 	}
 
 	for _, mc := range g.cfg.ManagedComponents {
 		components = append(components, map[string]string{
 			"slug":    mc.Slug,
-			"version": g.managedVersions[mc.Slug],
+			"version": managedVersionsSnapshot[mc.Slug],
 		})
 	}
 
@@ -69,7 +78,7 @@ func (g *Guard) sendHeartbeat() error {
 	}
 
 	var resp heartbeatResponse
-	if err := g.postJSON("/api/v1/heartbeat", reqBody, &resp); err != nil {
+	if err := g.postJSON(context.Background(), "/api/v1/heartbeat", reqBody, &resp); err != nil {
 		return fmt.Errorf("%w: %v", ErrNetworkError, err)
 	}
 

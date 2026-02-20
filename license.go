@@ -1,6 +1,7 @@
 package sdk
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
@@ -47,9 +48,11 @@ func (g *Guard) verifyLicense() error {
 		Error        string `json:"error"`
 		Message      string `json:"message"`
 		UpdateFrozen bool   `json:"update_frozen"`
+		PublicData   string `json:"public_data"`
+		Signature    string `json:"signature"`
 	}
 
-	if err := g.postJSON("/api/v1/verify", reqBody, &resp); err != nil {
+	if err := g.postJSON(context.Background(), "/api/v1/verify", reqBody, &resp); err != nil {
 		return fmt.Errorf("%w: %v", ErrNetworkError, err)
 	}
 
@@ -71,18 +74,19 @@ func (g *Guard) verifyLicense() error {
 	}
 
 	// 3. Cache locally
-	g.cacheLicense()
+	g.cacheLicense(resp.PublicData, resp.Signature)
 
 	return nil
 }
 
-func (g *Guard) cacheLicense() {
+func (g *Guard) cacheLicense(publicData, signature string) {
 	dir := g.cacheDir()
 	os.MkdirAll(dir, 0o700)
 
 	data := cachedLicense{
 		LicenseKey: g.cfg.LicenseKey,
-		PublicData: g.cfg.ProjectSlug,
+		PublicData: publicData,
+		Signature:  signature,
 		VerifiedAt: nowRFC3339(),
 	}
 
