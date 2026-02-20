@@ -1,13 +1,13 @@
-# DeployGuard Go SDK
+# BanyanHub SDK
 
 [English](./README.md)
 
-DeployGuard 的 Go 客户端 SDK，为你的 Go 应用提供许可证验证、机器指纹绑定、心跳保活、OTA 自动更新和激活码 (CDK) 激活能力。
+BanyanHub 的 Go 客户端 SDK，为你的 Go 应用提供许可证验证、机器指纹绑定、心跳保活、OTA 自动更新和激活码 (CDK) 激活能力。
 
 ## 安装
 
 ```bash
-go get github.com/iwen-conf/go-deploy-guard-sdk
+go get github.com/iwen-conf/BanyanHub-SDK
 ```
 
 要求 Go 1.24+。
@@ -22,7 +22,7 @@ import (
     "log"
     _ "embed"
 
-    sdk "github.com/iwen-conf/go-deploy-guard-sdk"
+    sdk "github.com/iwen-conf/BanyanHub-SDK"
 )
 
 //go:embed public_key.pem

@@ -1,13 +1,13 @@
-# DeployGuard Go SDK
+# BanyanHub SDK
 
 [中文文档](./README_zh.md)
 
-Go SDK for [DeployGuard](https://github.com/iwen-conf/go-deploy-guard) — a software deployment authorization guard system providing license verification, machine fingerprinting, heartbeat monitoring, OTA updates, and CDK activation.
+Go SDK for [BanyanHub](https://github.com/iwen-conf/BanyanHub-SDK) — an enterprise centralized release system providing license verification, machine fingerprinting, heartbeat monitoring, OTA updates, and CDK activation.
 
 ## Installation
 
 ```bash
-go get github.com/iwen-conf/go-deploy-guard-sdk
+go get github.com/iwen-conf/BanyanHub-SDK
 ```
 
 Requires Go 1.24+.
@@ -22,7 +22,7 @@ import (
     "log"
     _ "embed"
 
-    sdk "github.com/iwen-conf/go-deploy-guard-sdk"
+    sdk "github.com/iwen-conf/BanyanHub-SDK"
 )
 
 //go:embed public_key.pem

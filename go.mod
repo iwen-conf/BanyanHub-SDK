@@ -1,4 +1,4 @@
-module github.com/iwen-conf/go-deploy-guard-sdk
+module github.com/iwen-conf/BanyanHub-SDK
 
 go 1.24.11
 
