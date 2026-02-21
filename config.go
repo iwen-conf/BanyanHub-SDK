@@ -1,6 +1,9 @@
 package sdk
 
-import "time"
+import (
+	"runtime"
+	"time"
+)
 
 type Config struct {
 	ServerURL    string
@@ -25,7 +28,8 @@ type OTAConfig struct {
 	Enabled            bool
 	AutoUpdate         bool
 	CheckInterval      time.Duration
-	Platform           string
+	OS                 string
+	Arch               string
 	DownloadTimeout    time.Duration
 	MaxArtifactBytes   int64
 	OnUpdateProgress   func(component, stage string, progress float64)
@@ -60,8 +64,10 @@ func (c *Config) setDefaults() {
 	if c.OTA.CheckInterval == 0 {
 		c.OTA.CheckInterval = 6 * time.Hour
 	}
-	if c.OTA.Platform == "" {
-		c.OTA.Platform = "universal"
+	// Auto-detect OS and Arch from runtime if not configured
+	if c.OTA.OS == "" && c.OTA.Arch == "" {
+		c.OTA.OS = runtime.GOOS
+		c.OTA.Arch = runtime.GOARCH
 	}
 	if c.OTA.DownloadTimeout == 0 {
 		c.OTA.DownloadTimeout = 10 * time.Minute

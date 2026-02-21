@@ -61,7 +61,7 @@ func (g *Guard) updateBackend(u updateInfo) {
 	}
 
 	// Stage 1: Request download metadata
-	url, sha256Hash, signature, err := g.requestDownloadMeta(g.cfg.ComponentSlug, u.Latest, g.cfg.OTA.Platform)
+	url, sha256Hash, signature, err := g.requestDownloadMeta(g.cfg.ComponentSlug, u.Latest, g.cfg.OTA.OS, g.cfg.OTA.Arch)
 	if err != nil {
 		g.logger.Error("failed to request download metadata", "component", g.cfg.ComponentSlug, "error", err)
 		if g.cfg.OTA.OnUpdateFailure != nil {
@@ -164,14 +164,15 @@ func (g *Guard) updateBackend(u updateInfo) {
 	}
 }
 
-func (g *Guard) requestDownloadMeta(component, version, platform string) (url, sha256, signature string, err error) {
+func (g *Guard) requestDownloadMeta(component, version, os, arch string) (url, sha256, signature string, err error) {
 	reqBody := map[string]any{
 		"license_key":    g.cfg.LicenseKey,
 		"machine_id":     g.fingerprint.MachineID(),
 		"project_slug":   g.cfg.ProjectSlug,
 		"component_slug": component,
 		"version":        version,
-		"platform":       platform,
+		"os":             os,
+		"arch":           arch,
 	}
 
 	var resp struct {
@@ -286,7 +287,8 @@ func (g *Guard) updateFrontend(mc ManagedComponent, u updateInfo) {
 		"project_slug":   g.cfg.ProjectSlug,
 		"component_slug": mc.Slug,
 		"version":        u.Latest,
-		"platform":       "universal",
+		"os":             "universal",
+		"arch":           "universal",
 	}
 
 	var resp struct {
