@@ -178,3 +178,49 @@ func TestLicenseCache_InvalidSignature(t *testing.T) {
 		t.Error("expected signature verification to fail, but it succeeded")
 	}
 }
+
+func TestVerifyLicense_AllErrorCases(t *testing.T) {
+	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
+
+	testCases := []struct {
+		name       string
+		error      string
+		expectedErr error
+	}{
+		{"license_not_found", "license_not_found", ErrLicenseInvalid},
+		{"license_inactive", "license_inactive", ErrLicenseInvalid},
+		{"project_not_authorized", "project_not_authorized", ErrProjectNotAuthorized},
+		{"max_machines_exceeded", "max_machines_exceeded", ErrMaxMachinesExceeded},
+		{"machine_banned", "machine_banned", ErrMachineBanned},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				json.NewEncoder(w).Encode(map[string]string{
+					"error": tc.error,
+				})
+			}))
+			defer server.Close()
+
+			g := &Guard{
+				cfg: Config{
+					ServerURL:     server.URL,
+					LicenseKey:    "test-key",
+					ProjectSlug:   "test-project",
+					ComponentSlug: "backend",
+				},
+				publicKey: pubKey,
+				fingerprint: &Fingerprint{
+					machineID: "test-machine",
+				},
+				httpClient: &http.Client{Timeout: 30 * time.Second},
+			}
+
+			err := g.verifyLicense()
+			if err != tc.expectedErr {
+				t.Errorf("expected %v, got %v", tc.expectedErr, err)
+			}
+		})
+	}
+}

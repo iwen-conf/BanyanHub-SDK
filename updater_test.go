@@ -70,7 +70,7 @@ func TestUpdateBackend_Success(t *testing.T) {
 	// Note: This test will fail in actual execution because it tries to replace the running binary
 	// In a real test environment, you would mock the update.Apply function
 	// For now, we just test the download and verification stages
-	downloadURL, sha256Hash, signatureStr, err := g.requestDownloadMeta("backend", "2.0.0", "linux-amd64")
+	downloadURL, sha256Hash, signatureStr, err := g.requestDownloadMeta("backend", "2.0.0", g.cfg.OTA.OS, g.cfg.OTA.Arch)
 	if err != nil {
 		t.Fatalf("requestDownloadMeta failed: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestUpdateBackend_HashMismatch(t *testing.T) {
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}
 
-	url, expectedHash, _, err := g.requestDownloadMeta("backend", "2.0.0", "linux-amd64")
+	url, expectedHash, _, err := g.requestDownloadMeta("backend", "2.0.0", g.cfg.OTA.OS, g.cfg.OTA.Arch)
 	if err != nil {
 		t.Fatalf("requestDownloadMeta failed: %v", err)
 	}
