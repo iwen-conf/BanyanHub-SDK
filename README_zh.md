@@ -102,6 +102,31 @@ sdk.Config{
 }
 ```
 
+## 插件发现与手动更新
+
+当你希望由用户自行确认更新时，建议设置 `OTA.AutoUpdate = false`，然后使用插件接口：
+
+```go
+catalog, err := guard.GetPluginCatalog(context.Background(), true)
+if err != nil {
+    log.Fatal(err)
+}
+
+updates, err := guard.CheckPluginUpdates(context.Background())
+if err != nil {
+    log.Fatal(err)
+}
+
+for _, p := range updates {
+    // 由你的 UI/CLI 让用户确认
+    if p.Slug == "admin-frontend" {
+        if err := guard.UpdatePlugin(context.Background(), p.Slug); err != nil {
+            log.Printf("更新失败: %v", err)
+        }
+    }
+}
+```
+
 ## 状态机
 
 ```

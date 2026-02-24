@@ -167,3 +167,48 @@ func TestHeartbeat_VersionSnapshot(t *testing.T) {
 	<-done
 	// If no race condition, test passes
 }
+
+
+
+func TestSendHeartbeat_WithUpdateNotification(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/heartbeat" {
+			json.NewEncoder(w).Encode(heartbeatResponse{
+				Status:     "ok",
+				ServerTime: time.Now().Format(time.RFC3339),
+				Updates: []updateInfo{
+					{
+						Component: "backend",
+						Latest:    "2.0.0",
+					},
+				},
+			})
+		}
+	}))
+	defer server.Close()
+
+	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
+
+	g := &Guard{
+		cfg: Config{
+			ServerURL:     server.URL,
+			LicenseKey:    "test-key",
+			ProjectSlug:   "test-project",
+			ComponentSlug: "backend",
+		},
+		publicKey: pubKey,
+		fingerprint: &Fingerprint{
+			machineID: "test-machine",
+		},
+		httpClient: &http.Client{Timeout: 30 * time.Second},
+		sm:         newStateMachine(),
+		version:    "1.0.0",
+		managedVersions: map[string]string{},
+	}
+
+	g.sm.OnVerifySuccess()
+
+	if err := g.sendHeartbeat(); err != nil {
+		t.Errorf("sendHeartbeat failed: %v", err)
+	}
+}

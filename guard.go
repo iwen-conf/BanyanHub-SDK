@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -222,6 +223,35 @@ func (g *Guard) postJSON(ctx context.Context, path string, body any, result any)
 		return fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := g.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%w: status %d", ErrInvalidServerResponse, resp.StatusCode)
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
+	}
+
+	return nil
+}
+
+// getJSON sends a JSON GET request to the server and decodes the response.
+func (g *Guard) getJSON(ctx context.Context, path string, query url.Values, result any) error {
+	fullURL := g.cfg.ServerURL + path
+	if len(query) > 0 {
+		fullURL += "?" + query.Encode()
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
 
 	resp, err := g.httpClient.Do(req)
 	if err != nil {

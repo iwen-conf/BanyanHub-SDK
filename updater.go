@@ -33,7 +33,7 @@ func (g *Guard) handleUpdateNotification(u updateInfo) {
 				// Route based on strategy
 				switch mc.Strategy {
 				case UpdateBackend:
-					go g.updateBackend(u)
+					go g.updateManagedBackend(mc, u)
 				case UpdateFrontend:
 					go g.updateFrontend(mc, u)
 				default:
@@ -46,85 +46,6 @@ func (g *Guard) handleUpdateNotification(u updateInfo) {
 }
 
 func (g *Guard) updateBackend(u updateInfo) {
-	// Acquire update lock to prevent concurrent updates
-	g.updateMu.Lock()
-	defer g.updateMu.Unlock()
-
-	g.mu.RLock()
-	oldVersion := g.version
-	g.mu.RUnlock()
-
-	g.logger.Info("starting backend update", "component", g.cfg.ComponentSlug, "old_version", oldVersion, "new_version", u.Latest)
-
-	if g.cfg.OTA.OnUpdateProgress != nil {
-		g.cfg.OTA.OnUpdateProgress(g.cfg.ComponentSlug, "requesting", 0.0)
-	}
-
-	// Stage 1: Request download metadata
-	url, sha256Hash, signature, err := g.requestDownloadMeta(g.cfg.ComponentSlug, u.Latest, g.cfg.OTA.OS, g.cfg.OTA.Arch)
-	if err != nil {
-		g.logger.Error("failed to request download metadata", "component", g.cfg.ComponentSlug, "error", err)
-		if g.cfg.OTA.OnUpdateFailure != nil {
-			g.cfg.OTA.OnUpdateFailure(g.cfg.ComponentSlug, fmt.Errorf("%w: %v", ErrUpdateDownload, err))
-		}
-		if g.cfg.OTA.OnUpdateResult != nil {
-			g.cfg.OTA.OnUpdateResult(g.cfg.ComponentSlug, oldVersion, u.Latest, false, err)
-		}
-		return
-	}
-
-	if g.cfg.OTA.OnUpdateProgress != nil {
-		g.cfg.OTA.OnUpdateProgress(g.cfg.ComponentSlug, "downloading", 0.3)
-	}
-
-	// Stage 2: Download artifact with progress
-	tmpPath, actualSHA256, err := g.downloadArtifactWithProgress(url, g.cfg.OTA.MaxArtifactBytes)
-	if err != nil {
-		g.logger.Error("failed to download artifact", "component", g.cfg.ComponentSlug, "error", err)
-		if g.cfg.OTA.OnUpdateFailure != nil {
-			g.cfg.OTA.OnUpdateFailure(g.cfg.ComponentSlug, fmt.Errorf("%w: %v", ErrUpdateDownload, err))
-		}
-		if g.cfg.OTA.OnUpdateResult != nil {
-			g.cfg.OTA.OnUpdateResult(g.cfg.ComponentSlug, oldVersion, u.Latest, false, err)
-		}
-		return
-	}
-	defer os.Remove(tmpPath)
-
-	if g.cfg.OTA.OnUpdateProgress != nil {
-		g.cfg.OTA.OnUpdateProgress(g.cfg.ComponentSlug, "verifying", 0.6)
-	}
-
-	// Verify SHA256
-	if actualSHA256 != sha256Hash {
-		err := fmt.Errorf("hash mismatch: expected %s, got %s", sha256Hash, actualSHA256)
-		g.logger.Error("hash verification failed", "component", g.cfg.ComponentSlug, "error", err)
-		if g.cfg.OTA.OnUpdateFailure != nil {
-			g.cfg.OTA.OnUpdateFailure(g.cfg.ComponentSlug, fmt.Errorf("%w: %v", ErrUpdateVerify, err))
-		}
-		if g.cfg.OTA.OnUpdateResult != nil {
-			g.cfg.OTA.OnUpdateResult(g.cfg.ComponentSlug, oldVersion, u.Latest, false, err)
-		}
-		return
-	}
-
-	// Verify signature
-	if err := g.verifySignature(sha256Hash, signature); err != nil {
-		g.logger.Error("signature verification failed", "component", g.cfg.ComponentSlug, "error", err)
-		if g.cfg.OTA.OnUpdateFailure != nil {
-			g.cfg.OTA.OnUpdateFailure(g.cfg.ComponentSlug, fmt.Errorf("%w: %v", ErrUpdateVerify, err))
-		}
-		if g.cfg.OTA.OnUpdateResult != nil {
-			g.cfg.OTA.OnUpdateResult(g.cfg.ComponentSlug, oldVersion, u.Latest, false, err)
-		}
-		return
-	}
-
-	if g.cfg.OTA.OnUpdateProgress != nil {
-		g.cfg.OTA.OnUpdateProgress(g.cfg.ComponentSlug, "applying", 0.8)
-	}
-
-	// Stage 3: Apply binary update using go-selfupdate
 	exe, err := os.Executable()
 	if err != nil {
 		g.logger.Error("failed to get executable path", "component", g.cfg.ComponentSlug, "error", err)
@@ -132,36 +53,159 @@ func (g *Guard) updateBackend(u updateInfo) {
 			g.cfg.OTA.OnUpdateFailure(g.cfg.ComponentSlug, fmt.Errorf("%w: %v", ErrUpdateApply, err))
 		}
 		if g.cfg.OTA.OnUpdateResult != nil {
-			g.cfg.OTA.OnUpdateResult(g.cfg.ComponentSlug, oldVersion, u.Latest, false, err)
+			g.cfg.OTA.OnUpdateResult(g.cfg.ComponentSlug, g.currentVersion(), u.Latest, false, err)
 		}
 		return
 	}
 
-	if err := g.applyBackendBinaryWithSelfupdate(tmpPath, exe); err != nil {
-		g.logger.Error("failed to apply update", "component", g.cfg.ComponentSlug, "error", err)
+	g.updateBinaryComponent(g.cfg.ComponentSlug, u, exe, g.currentVersion, func(newVersion string) {
+		g.mu.Lock()
+		g.version = newVersion
+		g.mu.Unlock()
+	})
+}
+
+func (g *Guard) updateManagedBackend(mc ManagedComponent, u updateInfo) {
+	targetPath := strings.TrimSpace(mc.Dir)
+	if targetPath == "" {
+		err := fmt.Errorf("managed backend component %q requires Dir as target binary path", mc.Slug)
+		g.logger.Error("invalid managed backend config", "component", mc.Slug, "error", err)
 		if g.cfg.OTA.OnUpdateFailure != nil {
-			g.cfg.OTA.OnUpdateFailure(g.cfg.ComponentSlug, fmt.Errorf("%w: %v", ErrUpdateApply, err))
+			g.cfg.OTA.OnUpdateFailure(mc.Slug, fmt.Errorf("%w: %v", ErrUpdateApply, err))
 		}
 		if g.cfg.OTA.OnUpdateResult != nil {
-			g.cfg.OTA.OnUpdateResult(g.cfg.ComponentSlug, oldVersion, u.Latest, false, err)
+			g.cfg.OTA.OnUpdateResult(mc.Slug, g.currentManagedVersion(mc.Slug), u.Latest, false, err)
 		}
 		return
 	}
 
-	// Update version under lock
-	g.mu.Lock()
-	g.version = u.Latest
-	g.mu.Unlock()
+	g.updateBinaryComponent(mc.Slug, u, targetPath, func() string {
+		return g.currentManagedVersion(mc.Slug)
+	}, func(newVersion string) {
+		g.mu.Lock()
+		g.managedVersions[mc.Slug] = newVersion
+		g.mu.Unlock()
+	})
+}
 
-	g.logger.Info("backend update completed", "component", g.cfg.ComponentSlug, "old_version", oldVersion, "new_version", u.Latest)
+func (g *Guard) updateBinaryComponent(
+	componentSlug string,
+	u updateInfo,
+	targetPath string,
+	getCurrentVersion func() string,
+	setVersion func(newVersion string),
+) {
+	// Acquire update lock to prevent concurrent updates
+	g.updateMu.Lock()
+	defer g.updateMu.Unlock()
 
-	if g.cfg.OTA.OnUpdateResult != nil {
-		g.cfg.OTA.OnUpdateResult(g.cfg.ComponentSlug, oldVersion, u.Latest, true, nil)
+	oldVersion := getCurrentVersion()
+
+	g.logger.Info("starting backend update", "component", componentSlug, "old_version", oldVersion, "new_version", u.Latest)
+
+	if g.cfg.OTA.OnUpdateProgress != nil {
+		g.cfg.OTA.OnUpdateProgress(componentSlug, "requesting", 0.0)
+	}
+
+	// Stage 1: Request download metadata
+	url, sha256Hash, signature, err := g.requestDownloadMeta(componentSlug, u.Latest, g.cfg.OTA.OS, g.cfg.OTA.Arch)
+	if err != nil {
+		g.logger.Error("failed to request download metadata", "component", componentSlug, "error", err)
+		if g.cfg.OTA.OnUpdateFailure != nil {
+			g.cfg.OTA.OnUpdateFailure(componentSlug, fmt.Errorf("%w: %v", ErrUpdateDownload, err))
+		}
+		if g.cfg.OTA.OnUpdateResult != nil {
+			g.cfg.OTA.OnUpdateResult(componentSlug, oldVersion, u.Latest, false, err)
+		}
+		return
 	}
 
 	if g.cfg.OTA.OnUpdateProgress != nil {
-		g.cfg.OTA.OnUpdateProgress(g.cfg.ComponentSlug, "completed", 1.0)
+		g.cfg.OTA.OnUpdateProgress(componentSlug, "downloading", 0.3)
 	}
+
+	// Stage 2: Download artifact with progress
+	tmpPath, actualSHA256, err := g.downloadArtifactWithProgress(url, g.cfg.OTA.MaxArtifactBytes)
+	if err != nil {
+		g.logger.Error("failed to download artifact", "component", componentSlug, "error", err)
+		if g.cfg.OTA.OnUpdateFailure != nil {
+			g.cfg.OTA.OnUpdateFailure(componentSlug, fmt.Errorf("%w: %v", ErrUpdateDownload, err))
+		}
+		if g.cfg.OTA.OnUpdateResult != nil {
+			g.cfg.OTA.OnUpdateResult(componentSlug, oldVersion, u.Latest, false, err)
+		}
+		return
+	}
+	defer os.Remove(tmpPath)
+
+	if g.cfg.OTA.OnUpdateProgress != nil {
+		g.cfg.OTA.OnUpdateProgress(componentSlug, "verifying", 0.6)
+	}
+
+	// Verify SHA256
+	if actualSHA256 != sha256Hash {
+		err := fmt.Errorf("hash mismatch: expected %s, got %s", sha256Hash, actualSHA256)
+		g.logger.Error("hash verification failed", "component", componentSlug, "error", err)
+		if g.cfg.OTA.OnUpdateFailure != nil {
+			g.cfg.OTA.OnUpdateFailure(componentSlug, fmt.Errorf("%w: %v", ErrUpdateVerify, err))
+		}
+		if g.cfg.OTA.OnUpdateResult != nil {
+			g.cfg.OTA.OnUpdateResult(componentSlug, oldVersion, u.Latest, false, err)
+		}
+		return
+	}
+
+	// Verify signature
+	if err := g.verifySignature(sha256Hash, signature); err != nil {
+		g.logger.Error("signature verification failed", "component", componentSlug, "error", err)
+		if g.cfg.OTA.OnUpdateFailure != nil {
+			g.cfg.OTA.OnUpdateFailure(componentSlug, fmt.Errorf("%w: %v", ErrUpdateVerify, err))
+		}
+		if g.cfg.OTA.OnUpdateResult != nil {
+			g.cfg.OTA.OnUpdateResult(componentSlug, oldVersion, u.Latest, false, err)
+		}
+		return
+	}
+
+	if g.cfg.OTA.OnUpdateProgress != nil {
+		g.cfg.OTA.OnUpdateProgress(componentSlug, "applying", 0.8)
+	}
+
+	// Stage 3: Apply binary update using go-selfupdate
+	if err := g.applyBackendBinaryWithSelfupdate(tmpPath, targetPath); err != nil {
+		g.logger.Error("failed to apply update", "component", componentSlug, "error", err)
+		if g.cfg.OTA.OnUpdateFailure != nil {
+			g.cfg.OTA.OnUpdateFailure(componentSlug, fmt.Errorf("%w: %v", ErrUpdateApply, err))
+		}
+		if g.cfg.OTA.OnUpdateResult != nil {
+			g.cfg.OTA.OnUpdateResult(componentSlug, oldVersion, u.Latest, false, err)
+		}
+		return
+	}
+
+	setVersion(u.Latest)
+
+	g.logger.Info("backend update completed", "component", componentSlug, "old_version", oldVersion, "new_version", u.Latest)
+
+	if g.cfg.OTA.OnUpdateResult != nil {
+		g.cfg.OTA.OnUpdateResult(componentSlug, oldVersion, u.Latest, true, nil)
+	}
+
+	if g.cfg.OTA.OnUpdateProgress != nil {
+		g.cfg.OTA.OnUpdateProgress(componentSlug, "completed", 1.0)
+	}
+}
+
+func (g *Guard) currentVersion() string {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.version
+}
+
+func (g *Guard) currentManagedVersion(slug string) string {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.managedVersions[slug]
 }
 
 func (g *Guard) requestDownloadMeta(component, version, os, arch string) (url, sha256, signature string, err error) {
@@ -257,6 +301,7 @@ func (g *Guard) applyBackendBinaryWithSelfupdate(tmpPath, targetPath string) err
 	defer tmpFile.Close()
 
 	opts := update.Options{
+		TargetPath:  targetPath,
 		OldSavePath: targetPath + ".bak",
 	}
 

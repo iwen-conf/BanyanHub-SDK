@@ -102,6 +102,31 @@ sdk.Config{
 }
 ```
 
+## Plugin Discovery and Manual Updates
+
+If you want end users to confirm updates manually, set `OTA.AutoUpdate = false` and use:
+
+```go
+catalog, err := guard.GetPluginCatalog(context.Background(), true)
+if err != nil {
+    log.Fatal(err)
+}
+
+updates, err := guard.CheckPluginUpdates(context.Background())
+if err != nil {
+    log.Fatal(err)
+}
+
+for _, p := range updates {
+    // Let users confirm via your UI/CLI first
+    if p.Slug == "admin-frontend" {
+        if err := guard.UpdatePlugin(context.Background(), p.Slug); err != nil {
+            log.Printf("update failed: %v", err)
+        }
+    }
+}
+```
+
 ## State Machine
 
 ```
