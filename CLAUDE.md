@@ -1,11 +1,12 @@
-[根目录](../CLAUDE.md) > **SDK**
+# BanyanHub-SDK — Go 客户端 SDK
 
-# SDK — Go 客户端 SDK
+**仓库**: [github.com/iwen-conf/BanyanHub-SDK](https://github.com/iwen-conf/BanyanHub-SDK)
 
 ## 变更记录 (Changelog)
 
 | 日期 | 操作 | 说明 |
 |------|------|------|
+| 2026-03-04 | 独立仓库 | 从 BanyanHub 平台仓库 sdk/ 目录迁移为独立 Git 仓库 |
 | 2026-02-28 | 全量刷新 | 对照源码+多 Agent 交叉审阅：补齐 22 个测试文件、errors.go 实际 24 个错误常量（交叉审阅标记 25）、8 个端点；标注 Makefile ldflags 旧路径；依赖与版本号全部从 go.mod 精确提取 |
 | 2026-02-22 | 增量扫描 | 补充 CDK 激活、版本自动识别、OTA 三段式、错误定义、Config 字段、Makefile、ManagedComponent、测试文件说明 |
 | 2026-02-19 | 初始扫描 | 首次生成模块文档 |
@@ -105,9 +106,9 @@ graph TD
 - 测试文件（22 个）：activate_extended_test.go, activate_test.go, config_test.go, fingerprint_extended_test.go, fingerprint_test.go, guard_extended_test.go, guard_test.go, hash_extended_test.go, hash_test.go, heartbeat_error_test.go, heartbeat_extended_test.go, heartbeat_start_test.go, heartbeat_test.go, license_extended_test.go, license_test.go, plugins_test.go, state_string_test.go, state_test.go, updater_extended_test.go, updater_ota_test.go, updater_test.go, version_test.go。
 - 运行：`go test -v -race ./...`。
 - Makefile 目标：`make test`（race+coverprofile）、`make vet`、`make lint`（staticcheck 自动安装）、`make coverage`、`make all`。ldflags 仍指向旧路径 `github.com/user/go-deploy-guard/sdk`（需后续修正为当前模块路径）。
-- CI（.gitea/workflows/ci.yml）：Go 1.24 作业执行 `go build ./...` + `go test -v -race ./...`。
+- CI（.gitea/workflows/ci.yml）：Go 1.24 作业执行 `go build ./...` + `go test -v -race ./...`。（注：SDK 现为独立仓库，CI 需单独配置）
 
-## 关联文件清单（sdk/ 下所有 .go）
+## 关联文件清单（所有 .go）
 
 activate.go
 activate_extended_test.go
