@@ -3,3 +3,4 @@ coverage.html
 *.bak
 .deploy-guard/
 .DS_Store
+.ace-tool/
