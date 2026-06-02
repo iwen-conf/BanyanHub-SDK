@@ -5,10 +5,10 @@ BUILD_TIME ?= $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 GO_VERSION ?= $(shell go version | awk '{print $$3}')
 
 # Ldflags for version injection
-LDFLAGS := -X 'github.com/user/go-deploy-guard/sdk.Version=$(VERSION)' \
-           -X 'github.com/user/go-deploy-guard/sdk.GitCommit=$(GIT_COMMIT)' \
-           -X 'github.com/user/go-deploy-guard/sdk.BuildTime=$(BUILD_TIME)' \
-           -X 'github.com/user/go-deploy-guard/sdk.GoVersion=$(GO_VERSION)'
+LDFLAGS := -X 'github.com/iwen-conf/BanyanHub-SDK.Version=$(VERSION)' \
+           -X 'github.com/iwen-conf/BanyanHub-SDK.GitCommit=$(GIT_COMMIT)' \
+           -X 'github.com/iwen-conf/BanyanHub-SDK.BuildTime=$(BUILD_TIME)' \
+           -X 'github.com/iwen-conf/BanyanHub-SDK.GoVersion=$(GO_VERSION)'
 
 .PHONY: test vet lint coverage clean version
 

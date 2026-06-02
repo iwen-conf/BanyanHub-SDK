@@ -22,6 +22,8 @@ import (
 )
 
 func TestUpdateFrontend_SuccessFullCoverage(t *testing.T) {
+	pubKey, privKey, _ := ed25519.GenerateKey(rand.Reader)
+
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
@@ -44,6 +46,7 @@ func TestUpdateFrontend_SuccessFullCoverage(t *testing.T) {
 	tarGzBytes := buf.Bytes()
 	hash := sha256.Sum256(tarGzBytes)
 	hashStr := hex.EncodeToString(hash[:])
+	signature := signUpdateHash(t, privKey, hashStr)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -51,6 +54,7 @@ func TestUpdateFrontend_SuccessFullCoverage(t *testing.T) {
 			json.NewEncoder(w).Encode(map[string]string{
 				"download_url": "/download/frontend.tar.gz",
 				"sha256":       hashStr,
+				"signature":    signature,
 			})
 		case "/download/frontend.tar.gz":
 			w.Write(tarGzBytes)
@@ -63,8 +67,6 @@ func TestUpdateFrontend_SuccessFullCoverage(t *testing.T) {
 	successCalled := false
 	tempDir := t.TempDir()
 	targetDir := filepath.Join(tempDir, "live")
-
-	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
 
 	g := &Guard{
 		cfg: Config{
@@ -94,7 +96,9 @@ func TestUpdateFrontend_SuccessFullCoverage(t *testing.T) {
 	u := updateInfo{Component: "frontend", Latest: "2.0.0", UpdateAvailable: true}
 	mc := ManagedComponent{Slug: "frontend", Dir: targetDir}
 
-	g.updateFrontend(mc, u)
+	if err := g.updateFrontend(mc, u); err != nil {
+		t.Fatalf("updateFrontend failed: %v", err)
+	}
 
 	if !successCalled {
 		t.Fatal("expected OnUpdateResult success callback")
@@ -256,7 +260,7 @@ func TestUpdateFrontend_HashMismatch(t *testing.T) {
 }
 
 func TestUpdateFrontend_PathTraversalBlocked(t *testing.T) {
-	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
+	pubKey, privKey, _ := ed25519.GenerateKey(rand.Reader)
 
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
@@ -269,6 +273,7 @@ func TestUpdateFrontend_PathTraversalBlocked(t *testing.T) {
 
 	hash := sha256.Sum256(buf.Bytes())
 	hashStr := hex.EncodeToString(hash[:])
+	signature := signUpdateHash(t, privKey, hashStr)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -276,6 +281,7 @@ func TestUpdateFrontend_PathTraversalBlocked(t *testing.T) {
 			json.NewEncoder(w).Encode(map[string]string{
 				"download_url": "/download/frontend.tar.gz",
 				"sha256":       hashStr,
+				"signature":    signature,
 			})
 		case "/download/frontend.tar.gz":
 			w.Write(buf.Bytes())
@@ -304,7 +310,9 @@ func TestUpdateFrontend_PathTraversalBlocked(t *testing.T) {
 	}
 
 	mc := ManagedComponent{Slug: "frontend", Dir: tempDir}
-	g.updateFrontend(mc, updateInfo{Component: "frontend", Latest: "2.0.0"})
+	if err := g.updateFrontend(mc, updateInfo{Component: "frontend", Latest: "2.0.0"}); err != nil {
+		t.Fatalf("updateFrontend failed: %v", err)
+	}
 
 	badPath := filepath.Join(tempDir, "..", "etc", "passwd")
 	if _, err := os.Stat(badPath); err == nil {

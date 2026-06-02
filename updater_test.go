@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -325,40 +326,49 @@ func TestUpdateBackend_ConcurrentUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	failureCalled := false
+	resultCalled := false
 	g := &Guard{
 		cfg: Config{
 			ServerURL:     "http://localhost",
 			LicenseKey:    "test-key",
 			ProjectSlug:   "test-project",
 			ComponentSlug: "backend",
+			OTA: OTAConfig{
+				OnUpdateFailure: func(component string, err error) {
+					failureCalled = err == ErrUpdateConcurrent
+				},
+				OnUpdateResult: func(component, oldVer, newVer string, success bool, err error) {
+					resultCalled = err == ErrUpdateConcurrent && !success
+				},
+			},
 		},
 		publicKey: pubKey,
 		fingerprint: &Fingerprint{
 			machineID: "test-machine",
 		},
 		httpClient: &http.Client{Timeout: 30 * time.Second},
+		managedVersions: map[string]string{
+			"frontend": "1.0.0",
+		},
 	}
 
 	g.updateMu.Lock()
-
-	done := make(chan bool)
-	go func() {
-		g.updateMu.Lock()
-		g.updateMu.Unlock()
-		done <- true
-	}()
-
-	select {
-	case <-done:
-		t.Error("expected goroutine to be blocked, but it completed")
-	case <-time.After(100 * time.Millisecond):
-	}
-
+	err = g.updateFrontend(ManagedComponent{Slug: "frontend", Dir: t.TempDir()}, updateInfo{
+		Component:       "frontend",
+		Latest:          "2.0.0",
+		UpdateAvailable: true,
+	})
 	g.updateMu.Unlock()
-	select {
-	case <-done:
-	case <-time.After(1 * time.Second):
-		t.Error("goroutine did not complete after unlock")
+
+	if err != ErrUpdateConcurrent {
+		t.Fatalf("expected ErrUpdateConcurrent, got %v", err)
+	}
+	if !failureCalled {
+		t.Fatal("expected OnUpdateFailure to receive ErrUpdateConcurrent")
+	}
+	if !resultCalled {
+		t.Fatal("expected OnUpdateResult to receive ErrUpdateConcurrent")
 	}
 }
 
@@ -369,20 +379,20 @@ func TestUpdateFrontend_PathTraversal(t *testing.T) {
 	cleanedTarget := filepath.Clean(target)
 	cleanedTmpDir := filepath.Clean(tmpDir) + string(os.PathSeparator)
 
-	if !filepath.HasPrefix(cleanedTarget, cleanedTmpDir) {
+	if !strings.HasPrefix(cleanedTarget, cleanedTmpDir) {
 		t.Error("valid path rejected")
 	}
 
 	maliciousTarget := filepath.Join(tmpDir, "..", "etc", "passwd")
 	cleanedMalicious := filepath.Clean(maliciousTarget)
 
-	if filepath.HasPrefix(cleanedMalicious, cleanedTmpDir) {
+	if strings.HasPrefix(cleanedMalicious, cleanedTmpDir) {
 		t.Error("path traversal attempt not detected")
 	}
 }
 
 func TestUpdateFrontend_TarGzExtraction(t *testing.T) {
-	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
+	pubKey, privKey, _ := ed25519.GenerateKey(rand.Reader)
 
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
@@ -400,14 +410,15 @@ func TestUpdateFrontend_TarGzExtraction(t *testing.T) {
 	gz.Close()
 
 	tarGzData := buf.Bytes()
-	hash := sha256.Sum256(tarGzData)
-	hashStr := hex.EncodeToString(hash[:])
+	hashStr := sha256Hex(tarGzData)
+	signature := signUpdateHash(t, privKey, hashStr)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/update/download" {
 			json.NewEncoder(w).Encode(map[string]string{
 				"download_url": "/download/frontend.tar.gz",
 				"sha256":       hashStr,
+				"signature":    signature,
 			})
 		} else if r.URL.Path == "/download/frontend.tar.gz" {
 			w.Write(tarGzData)
@@ -433,9 +444,12 @@ func TestUpdateFrontend_TarGzExtraction(t *testing.T) {
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}
 
-	url, _, _, err := g.requestDownloadMeta("frontend", "2.0.0", "universal", "universal")
+	url, _, gotSignature, err := g.requestDownloadMeta("frontend", "2.0.0", "universal", "universal")
 	if err != nil {
 		t.Fatalf("requestDownloadMeta failed: %v", err)
+	}
+	if gotSignature != signature {
+		t.Fatalf("expected signature %s, got %s", signature, gotSignature)
 	}
 
 	tmpPath, actualHash, err := g.downloadArtifactWithProgress(url, g.cfg.OTA.MaxArtifactBytes)

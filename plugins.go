@@ -172,9 +172,8 @@ func (g *Guard) UpdatePlugin(ctx context.Context, slug string) error {
 			return nil
 		}
 
-		g.updateBackend(u)
-		if g.currentVersion() != u.Latest {
-			return ErrUpdateApply
+		if err := g.updateBackend(u); err != nil {
+			return err
 		}
 		return nil
 	}
@@ -191,13 +190,13 @@ func (g *Guard) UpdatePlugin(ctx context.Context, slug string) error {
 
 	switch mc.Strategy {
 	case UpdateBackend:
-		g.updateManagedBackend(mc, u)
+		if err := g.updateManagedBackend(mc, u); err != nil {
+			return err
+		}
 	default:
-		g.updateFrontend(mc, u)
-	}
-
-	if g.currentManagedVersion(slug) != u.Latest {
-		return ErrUpdateApply
+		if err := g.updateFrontend(mc, u); err != nil {
+			return err
+		}
 	}
 
 	return nil

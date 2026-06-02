@@ -45,14 +45,14 @@ type verifyResponse struct {
 	Message        string          `json:"message"`
 }
 
-func (g *Guard) verifyLicense() error {
+func (g *Guard) verifyLicense(ctx context.Context) error {
 	now := time.Now()
 	if err := g.validatePersistedLease(now); err == nil {
 		g.sm.OnVerifySuccess()
 		return nil
 	}
 
-	verifiedLease, leaseSignature, err := g.verifyOnline(now)
+	verifiedLease, leaseSignature, err := g.verifyOnline(ctx, now)
 	if err != nil {
 		return err
 	}
@@ -63,28 +63,28 @@ func (g *Guard) verifyLicense() error {
 	return nil
 }
 
-func (g *Guard) verifyOnline(now time.Time) (*lease, string, error) {
+func (g *Guard) verifyOnline(parent context.Context, now time.Time) (*lease, string, error) {
 	binaryHash, err := GetBinaryHash()
 	if err != nil {
 		return nil, "", fmt.Errorf("%w: %v", ErrNetworkError, err)
 	}
 
 	reqBody := map[string]any{
-		"license_key":  g.cfg.LicenseKey,
-		"machine_id":   g.fingerprint.MachineID(),
-		"aux_signals":  g.fingerprint.AuxSignals(),
-		"project_slug": g.cfg.ProjectSlug,
+		"license_key":    g.cfg.LicenseKey,
+		"machine_id":     g.fingerprint.MachineID(),
+		"aux_signals":    g.fingerprint.AuxSignals(),
+		"project_slug":   g.cfg.ProjectSlug,
 		"component_slug": g.cfg.ComponentSlug,
-		"hostname":     hostname(),
-		"os":           g.fingerprint.auxSignals["os"],
-		"arch":         g.fingerprint.auxSignals["arch"],
-		"nonce":        randomNonce(),
-		"timestamp":    now.Unix(),
-		"binary_hash":  binaryHash,
+		"hostname":       hostname(),
+		"os":             g.fingerprint.auxSignals["os"],
+		"arch":           g.fingerprint.auxSignals["arch"],
+		"nonce":          randomNonce(),
+		"timestamp":      now.Unix(),
+		"binary_hash":    binaryHash,
 	}
 
 	var resp verifyResponse
-	ctx, cancel := context.WithTimeout(context.Background(), verifyTimeout)
+	ctx, cancel := context.WithTimeout(parent, verifyTimeout)
 	defer cancel()
 
 	if err := g.postJSON(ctx, "/api/v1/verify", reqBody, &resp); err != nil {

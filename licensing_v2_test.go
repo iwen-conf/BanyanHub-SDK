@@ -53,7 +53,7 @@ func TestHeartbeat_UnsignedResponseForcesFailure(t *testing.T) {
 
 	guard.cfg.ServerURL = server.URL
 	guard.httpClient = insecureClientFromServer(server)
-	err := guard.sendHeartbeat()
+	err := guard.sendHeartbeat(context.Background())
 	if err == nil {
 		t.Fatal("expected invalid heartbeat error")
 	}
@@ -316,4 +316,91 @@ func TestStartUsesPersistedLease(t *testing.T) {
 		t.Fatalf("Start failed: %v", err)
 	}
 	guard.Stop()
+}
+
+func TestStartIsIdempotent(t *testing.T) {
+	guard, privKey := newTestGuard(t, nil)
+	leaseJSON, sig := signedLeaseJSON(t, privKey, testLease(guard.fingerprint.MachineID()))
+	if err := guard.acceptLease(mustParseLease(t, leaseJSON), sig, false); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := guard.Start(context.Background()); err != nil {
+		t.Fatalf("first Start failed: %v", err)
+	}
+	firstDone := guard.heartbeatDone
+
+	if err := guard.Start(context.Background()); err != nil {
+		t.Fatalf("second Start failed: %v", err)
+	}
+	if guard.heartbeatDone != firstDone {
+		t.Fatal("expected second Start to reuse existing heartbeat loop")
+	}
+
+	guard.Stop()
+}
+
+func TestStopCancelsInFlightHeartbeat(t *testing.T) {
+	guard, privKey := newTestGuard(t, nil)
+	leaseJSON, sig := signedLeaseJSON(t, privKey, testLease(guard.fingerprint.MachineID()))
+	if err := guard.acceptLease(mustParseLease(t, leaseJSON), sig, false); err != nil {
+		t.Fatal(err)
+	}
+
+	started := make(chan struct{}, 1)
+	canceled := make(chan struct{}, 1)
+	guard.cfg.ServerURL = "https://example.invalid"
+	guard.cfg.HeartbeatInterval = time.Millisecond
+	guard.httpClient = &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Path != "/api/v1/heartbeat" {
+				return nil, http.ErrUseLastResponse
+			}
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+
+			<-req.Context().Done()
+			select {
+			case canceled <- struct{}{}:
+			default:
+			}
+			return nil, req.Context().Err()
+		}),
+	}
+
+	if err := guard.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("heartbeat request did not start")
+	}
+
+	stopped := make(chan struct{})
+	go func() {
+		guard.Stop()
+		close(stopped)
+	}()
+
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop did not return after canceling heartbeat")
+	}
+
+	select {
+	case <-canceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected in-flight heartbeat request to be canceled")
+	}
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

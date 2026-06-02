@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"time"
@@ -31,11 +32,13 @@ type updateInfo struct {
 	ReleaseNotes    string `json:"release_notes"`
 }
 
-func (g *Guard) startHeartbeat(ctx context.Context) {
+func (g *Guard) startHeartbeat(ctx context.Context, done chan struct{}) {
 	interval := g.cfg.HeartbeatInterval
 	graceStart := time.Time{}
 
 	go func() {
+		defer g.finishHeartbeat(done)
+
 		for {
 			jitter := time.Duration(float64(interval) * (0.9 + rand.Float64()*0.2))
 			select {
@@ -44,11 +47,14 @@ func (g *Guard) startHeartbeat(ctx context.Context) {
 			case <-time.After(jitter):
 			}
 
-			err := g.sendHeartbeat()
+			err := g.sendHeartbeat(ctx)
 			if err == nil {
 				g.sm.OnHeartbeatOK()
 				graceStart = time.Time{}
 				continue
+			}
+			if errors.Is(err, context.Canceled) {
+				return
 			}
 
 			if isFatalError(err) {
@@ -71,7 +77,7 @@ func (g *Guard) startHeartbeat(ctx context.Context) {
 	}()
 }
 
-func (g *Guard) sendHeartbeat() error {
+func (g *Guard) sendHeartbeat(parent context.Context) error {
 	g.mu.RLock()
 	currentVersion := g.version
 	managedVersionsSnapshot := make(map[string]string, len(g.managedVersions))
@@ -99,20 +105,23 @@ func (g *Guard) sendHeartbeat() error {
 	}
 	nonce := randomNonce()
 	reqBody := map[string]any{
-		"license_key":  g.cfg.LicenseKey,
-		"machine_id":   g.fingerprint.MachineID(),
-		"project_slug": g.cfg.ProjectSlug,
+		"license_key":    g.cfg.LicenseKey,
+		"machine_id":     g.fingerprint.MachineID(),
+		"project_slug":   g.cfg.ProjectSlug,
 		"component_slug": g.cfg.ComponentSlug,
-		"components":   components,
-		"nonce":        nonce,
-		"timestamp":    nowUnix(),
-		"binary_hash":  binaryHash,
+		"components":     components,
+		"nonce":          nonce,
+		"timestamp":      nowUnix(),
+		"binary_hash":    binaryHash,
 	}
 
 	var resp heartbeatResponse
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
 	if err := g.postJSON(ctx, "/api/v1/heartbeat", reqBody, &resp); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return fmt.Errorf("%w: %v", ErrNetworkError, err)
 	}
 

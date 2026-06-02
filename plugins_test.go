@@ -7,8 +7,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -245,7 +243,7 @@ func TestRequestPluginUpdate_DirectEndpoint(t *testing.T) {
 }
 
 func TestUpdatePlugin_FrontendSuccess(t *testing.T) {
-	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
+	pubKey, privKey, _ := ed25519.GenerateKey(rand.Reader)
 
 	liveDir := t.TempDir()
 	targetDir := filepath.Join(liveDir, "frontend-live")
@@ -259,8 +257,8 @@ func TestUpdatePlugin_FrontendSuccess(t *testing.T) {
 	tarGzBytes := buildTarGz(t, map[string]string{
 		"index.html": "new-frontend",
 	})
-	hash := sha256.Sum256(tarGzBytes)
-	hashHex := hex.EncodeToString(hash[:])
+	hashHex := sha256Hex(tarGzBytes)
+	signature := signUpdateHash(t, privKey, hashHex)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -295,6 +293,7 @@ func TestUpdatePlugin_FrontendSuccess(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"download_url": "/api/v1/update/fetch/token-1",
 				"sha256":       hashHex,
+				"signature":    signature,
 			})
 		case "/api/v1/update/fetch/token-1":
 			w.WriteHeader(http.StatusOK)

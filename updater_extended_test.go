@@ -22,7 +22,7 @@ func TestHandleUpdateNotification_NoUpdate(t *testing.T) {
 				AutoUpdate: true,
 			},
 		},
-		mu: sync.RWMutex{},
+		mu:     sync.RWMutex{},
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 
@@ -103,28 +103,31 @@ func TestUpdateBackend_RequestDownloadFailure(t *testing.T) {
 
 // TestUpdateFrontend_Success tests successful frontend update
 func TestUpdateFrontend_Success(t *testing.T) {
-	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
+	pubKey, privKey, _ := ed25519.GenerateKey(rand.Reader)
 
 	tempDir := t.TempDir()
+	archive := []byte{0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
+	hashHex := sha256Hex(archive)
+	signature := signUpdateHash(t, privKey, hashHex)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/update/download" {
 			json.NewEncoder(w).Encode(map[string]string{
 				"download_url": "/download/frontend.tar.gz",
-				"sha256":       "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+				"sha256":       hashHex,
+				"signature":    signature,
 			})
 		} else if r.URL.Path == "/download/frontend.tar.gz" {
-			// Empty gzip archive
-			w.Write([]byte{0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
+			w.Write(archive)
 		}
 	}))
 	defer server.Close()
 
 	g := &Guard{
 		cfg: Config{
-			ServerURL:     server.URL,
-			LicenseKey:    "test-key",
-			ProjectSlug:   "test-project",
+			ServerURL:   server.URL,
+			LicenseKey:  "test-key",
+			ProjectSlug: "test-project",
 			OTA: OTAConfig{
 				AutoUpdate: true,
 				OnUpdateResult: func(component, oldVer, newVer string, success bool, err error) {
@@ -156,7 +159,9 @@ func TestUpdateFrontend_Success(t *testing.T) {
 		Dir:  tempDir,
 	}
 
-	g.updateFrontend(mc, u)
+	if err := g.updateFrontend(mc, u); err != nil {
+		t.Fatalf("updateFrontend failed: %v", err)
+	}
 }
 
 // TestUpdateFrontend_NetworkError tests frontend update with network error
@@ -168,9 +173,9 @@ func TestUpdateFrontend_NetworkError(t *testing.T) {
 	failureCalled := false
 	g := &Guard{
 		cfg: Config{
-			ServerURL:     "http://invalid-server-that-does-not-exist.local",
-			LicenseKey:    "test-key",
-			ProjectSlug:   "test-project",
+			ServerURL:   "http://invalid-server-that-does-not-exist.local",
+			LicenseKey:  "test-key",
+			ProjectSlug: "test-project",
 			OTA: OTAConfig{
 				OnUpdateFailure: func(component string, err error) {
 					failureCalled = true
@@ -201,7 +206,7 @@ func TestUpdateFrontend_NetworkError(t *testing.T) {
 		Dir:  tempDir,
 	}
 
-	g.updateFrontend(mc, u)
+	_ = g.updateFrontend(mc, u)
 
 	if !failureCalled {
 		t.Error("expected OnUpdateFailure to be called")
@@ -220,7 +225,7 @@ func TestHandleUpdateNotification_ManagedComponentBackend(t *testing.T) {
 				AutoUpdate: false, // Disable auto-update to avoid goroutine
 			},
 		},
-		mu: sync.RWMutex{},
+		mu:     sync.RWMutex{},
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 
@@ -239,7 +244,7 @@ func TestApplyBackendBinaryWithSelfupdate_FileNotFoundExtended(t *testing.T) {
 
 	g := &Guard{
 		publicKey: pubKey,
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 
 	err := g.applyBackendBinaryWithSelfupdate("/nonexistent/path/binary", "/target/path")

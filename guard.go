@@ -36,10 +36,13 @@ type Guard struct {
 	version         string
 	managedVersions map[string]string
 
-	cancel   context.CancelFunc
-	mu       sync.RWMutex
-	updateMu sync.Mutex
-	logger   *slog.Logger
+	cancel        context.CancelFunc
+	heartbeatDone chan struct{}
+	mu            sync.RWMutex
+	updateMu      sync.Mutex
+	lifecycleMu   sync.Mutex
+	running       bool
+	logger        *slog.Logger
 }
 
 func New(cfg Config) (*Guard, error) {
@@ -109,22 +112,60 @@ func New(cfg Config) (*Guard, error) {
 }
 
 func (g *Guard) Start(ctx context.Context) error {
-	ctx, cancel := context.WithCancel(ctx)
-	g.cancel = cancel
+	g.lifecycleMu.Lock()
+	defer g.lifecycleMu.Unlock()
 
-	if err := g.verifyLicense(); err != nil {
+	if g.running {
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+
+	if err := g.verifyLicense(ctx); err != nil {
 		cancel()
 		return fmt.Errorf("license verification failed: %w", err)
 	}
 
-	g.startHeartbeat(ctx)
+	done := make(chan struct{})
+	g.cancel = cancel
+	g.heartbeatDone = done
+	g.running = true
+	g.startHeartbeat(ctx, done)
 
 	return nil
 }
 
 func (g *Guard) Stop() {
-	if g.cancel != nil {
-		g.cancel()
+	g.lifecycleMu.Lock()
+	if !g.running {
+		g.lifecycleMu.Unlock()
+		return
+	}
+
+	cancel := g.cancel
+	done := g.heartbeatDone
+	g.running = false
+	g.cancel = nil
+	g.heartbeatDone = nil
+	g.lifecycleMu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	if done != nil {
+		<-done
+	}
+}
+
+func (g *Guard) finishHeartbeat(done chan struct{}) {
+	close(done)
+
+	g.lifecycleMu.Lock()
+	defer g.lifecycleMu.Unlock()
+	if g.heartbeatDone == done {
+		g.running = false
+		g.cancel = nil
+		g.heartbeatDone = nil
 	}
 }
 
@@ -370,10 +411,6 @@ func randomNonce() string {
 
 func nowUnix() int64 {
 	return time.Now().Unix()
-}
-
-func nowRFC3339() string {
-	return time.Now().Format(time.RFC3339)
 }
 
 func hostname() string {
