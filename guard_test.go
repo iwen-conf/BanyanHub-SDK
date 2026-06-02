@@ -15,11 +15,12 @@ func TestNew_Success(t *testing.T) {
 	pubKeyPEM := pemEncodePublicKey(pubKey)
 
 	cfg := Config{
-		ServerURL:     "https://api.example.com",
-		LicenseKey:    "test-key",
-		PublicKeyPEM:  pubKeyPEM,
-		ProjectSlug:   "test-project",
-		ComponentSlug: "backend",
+		ServerURL:        "https://api.example.com",
+		LicenseKey:       "test-key",
+		PublicKeyPEM:     pubKeyPEM,
+		ProjectSlug:      "test-project",
+		ComponentSlug:    "backend",
+		AllowSystemTrust: true,
 	}
 
 	g, err := New(cfg)
@@ -46,29 +47,29 @@ func TestNew_MissingParameters(t *testing.T) {
 		cfg         Config
 		expectedErr string
 	}{
-// Note: empty ServerURL now uses DefaultServerURL, not an error
-// Removed "missing server URL" test case
-{
-"missing license key",
-Config{ServerURL: "url", PublicKeyPEM: pubKeyPEM, ProjectSlug: "proj", ComponentSlug: "comp"},
-"license_key is required",
-},
-{
-"missing public key",
-Config{ServerURL: "url", LicenseKey: "key", ProjectSlug: "proj", ComponentSlug: "comp"},
-"public_key_pem is required",
-},
-{
-"missing project slug",
-Config{ServerURL: "url", LicenseKey: "key", PublicKeyPEM: pubKeyPEM, ComponentSlug: "comp"},
-"project_slug is required",
-},
-{
-"missing component slug",
-Config{ServerURL: "url", LicenseKey: "key", PublicKeyPEM: pubKeyPEM, ProjectSlug: "proj"},
-"component_slug is required",
-},
-}
+		// Note: empty ServerURL now uses DefaultServerURL, not an error
+		// Removed "missing server URL" test case
+		{
+			"missing license key",
+			Config{ServerURL: "url", PublicKeyPEM: pubKeyPEM, ProjectSlug: "proj", ComponentSlug: "comp"},
+			"license_key is required",
+		},
+		{
+			"missing public key",
+			Config{ServerURL: "url", LicenseKey: "key", ProjectSlug: "proj", ComponentSlug: "comp"},
+			"public_key_pem is required",
+		},
+		{
+			"missing project slug",
+			Config{ServerURL: "url", LicenseKey: "key", PublicKeyPEM: pubKeyPEM, ComponentSlug: "comp"},
+			"project_slug is required",
+		},
+		{
+			"missing component slug",
+			Config{ServerURL: "url", LicenseKey: "key", PublicKeyPEM: pubKeyPEM, ProjectSlug: "proj"},
+			"component_slug is required",
+		},
+	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -80,6 +81,22 @@ Config{ServerURL: "url", LicenseKey: "key", PublicKeyPEM: pubKeyPEM, ProjectSlug
 				t.Errorf("expected error %q, got %q", tt.expectedErr, err.Error())
 			}
 		})
+	}
+}
+
+func TestNew_HTTPSRequiresPinOrSystemTrust(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
+
+	_, err := New(Config{
+		ServerURL:     "https://api.example.com",
+		LicenseKey:    "test-key",
+		PublicKeyPEM:  pemEncodePublicKey(pubKey),
+		ProjectSlug:   "test-project",
+		ComponentSlug: "backend",
+	})
+	if err != ErrTLSPinNotConfigured {
+		t.Fatalf("expected ErrTLSPinNotConfigured, got %v", err)
 	}
 }
 

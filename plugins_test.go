@@ -163,6 +163,87 @@ func TestCheckPluginUpdates_FiltersAvailableOnly(t *testing.T) {
 	}
 }
 
+func TestRequestPluginUpdate_DirectEndpoint(t *testing.T) {
+	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
+	currentVersion := "1.2.0"
+	releaseNotes := "security fixes"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/plugins/admin-frontend/update" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if body["license_key"] != "LIC-1" {
+			t.Fatalf("unexpected license key: %v", body["license_key"])
+		}
+		if body["project_slug"] != "myproj" {
+			t.Fatalf("unexpected project slug: %v", body["project_slug"])
+		}
+		if body["machine_id"] == "" {
+			t.Fatalf("missing machine_id")
+		}
+		if body["version"] != "2.0.0" {
+			t.Fatalf("unexpected version: %v", body["version"])
+		}
+		if body["os"] != "linux" || body["arch"] != "amd64" {
+			t.Fatalf("unexpected platform: os=%v arch=%v", body["os"], body["arch"])
+		}
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"message":          "ready",
+			"plugin":           "admin-frontend",
+			"current_version":  currentVersion,
+			"target_version":   "2.0.0",
+			"update_available": true,
+			"download_url":     "/api/v1/update/fetch/token-1?machine_id=machine-1",
+			"sha256":           "abc",
+			"signature":        "sig",
+			"size_bytes":       123,
+			"release_notes":    releaseNotes,
+			"expires_in":       300,
+		})
+	}))
+	defer srv.Close()
+
+	g, err := New(Config{
+		ServerURL:     srv.URL,
+		LicenseKey:    "LIC-1",
+		PublicKeyPEM:  pemEncodePublicKey(pubKey),
+		ProjectSlug:   "myproj",
+		ComponentSlug: "backend",
+		OTA: OTAConfig{
+			OS:   "linux",
+			Arch: "amd64",
+		},
+	})
+	if err != nil {
+		t.Fatalf("new guard: %v", err)
+	}
+
+	pkg, err := g.RequestPluginUpdate(context.Background(), "admin-frontend", PluginUpdateOptions{
+		Version: "2.0.0",
+	})
+	if err != nil {
+		t.Fatalf("request plugin update: %v", err)
+	}
+	if pkg.Plugin != "admin-frontend" || pkg.TargetVersion != "2.0.0" || !pkg.UpdateAvailable {
+		t.Fatalf("unexpected plugin update package: %#v", pkg)
+	}
+	if pkg.CurrentVersion == nil || *pkg.CurrentVersion != currentVersion {
+		t.Fatalf("unexpected current version: %#v", pkg.CurrentVersion)
+	}
+	if pkg.ReleaseNotes == nil || *pkg.ReleaseNotes != releaseNotes {
+		t.Fatalf("unexpected release notes: %#v", pkg.ReleaseNotes)
+	}
+}
+
 func TestUpdatePlugin_FrontendSuccess(t *testing.T) {
 	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
 
@@ -204,6 +285,13 @@ func TestUpdatePlugin_FrontendSuccess(t *testing.T) {
 				},
 			})
 		case "/api/v1/update/download":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode download body: %v", err)
+			}
+			if body["os"] != "linux" || body["arch"] != "amd64" {
+				t.Fatalf("unexpected download platform: os=%v arch=%v", body["os"], body["arch"])
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"download_url": "/api/v1/update/fetch/token-1",
 				"sha256":       hashHex,

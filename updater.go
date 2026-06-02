@@ -117,7 +117,8 @@ func (g *Guard) updateBinaryComponent(
 	}
 
 	// Stage 1: Request download metadata
-	url, sha256Hash, signature, err := g.requestDownloadMeta(componentSlug, u.Latest, g.cfg.OTA.OS, g.cfg.OTA.Arch)
+	osValue, archValue := g.resolveOTAPlatform("", "")
+	url, sha256Hash, signature, err := g.requestDownloadMeta(componentSlug, u.Latest, osValue, archValue)
 	if err != nil {
 		g.logger.Error("failed to request download metadata", "component", componentSlug, "error", err.Error())
 		if g.cfg.OTA.OnUpdateFailure != nil {
@@ -333,14 +334,15 @@ func (g *Guard) updateFrontend(mc ManagedComponent, u updateInfo) {
 		g.cfg.OTA.OnUpdateProgress(mc.Slug, "requesting", 0.0)
 	}
 
+	osValue, archValue := g.resolveOTAPlatform("", "")
 	reqBody := map[string]any{
 		"license_key":    g.cfg.LicenseKey,
 		"machine_id":     g.fingerprint.MachineID(),
 		"project_slug":   g.cfg.ProjectSlug,
 		"component_slug": mc.Slug,
 		"version":        u.Latest,
-		"os":             "universal",
-		"arch":           "universal",
+		"os":             osValue,
+		"arch":           archValue,
 	}
 
 	var resp struct {

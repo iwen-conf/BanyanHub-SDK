@@ -38,6 +38,9 @@ func main() {
         PublicKeyPEM:  publicKeyPEM,
         ProjectSlug:   "my-project",
         ComponentSlug: "backend",
+        PinnedSPKIHashes: []string{
+            "base64-spki-sha256",
+        },
     })
     if err != nil {
         log.Fatal(err)
@@ -129,6 +132,18 @@ sdk.Config{
             },
         },
     },
+
+    // 可选：额外验签材料
+    LegacyPublicKeysPEM: [][]byte{legacyPublicKeyPEM},
+
+    // HTTPS 必填：固定服务端证书 SPKI SHA-256 hash
+    PinnedSPKIHashes: []string{
+        "base64-spki-primary",
+        "base64-spki-rotation",
+    },
+
+    // 仅限开发环境的逃生口。生产 SDK 不应启用，除非部署方明确接受系统 CA 信任而不是 SPKI pinning。
+    AllowSystemTrust: false,
 }
 ```
 

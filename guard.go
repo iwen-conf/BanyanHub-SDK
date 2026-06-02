@@ -3,10 +3,10 @@ package sdk
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"crypto/ed25519"
-	"crypto/tls"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
@@ -422,6 +422,9 @@ func newPinnedHTTPClient(cfg Config) (*http.Client, error) {
 			continue
 		}
 		normalizedPins[normalized] = struct{}{}
+	}
+	if strings.HasPrefix(strings.TrimSpace(cfg.ServerURL), "https://") && len(normalizedPins) == 0 {
+		return nil, ErrTLSPinNotConfigured
 	}
 	tlsCfg := &tls.Config{
 		MinVersion: tls.VersionTLS12,

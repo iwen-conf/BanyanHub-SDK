@@ -38,6 +38,9 @@ func main() {
         PublicKeyPEM:  publicKeyPEM,
         ProjectSlug:   "my-project",
         ComponentSlug: "backend",
+        PinnedSPKIHashes: []string{
+            "base64-spki-sha256",
+        },
     })
     if err != nil {
         log.Fatal(err)
@@ -134,11 +137,14 @@ sdk.Config{
     // Optional: extra verification material
     LegacyPublicKeysPEM: [][]byte{legacyPublicKeyPEM},
 
-    // Required for HTTPS pinning unless you explicitly allow system trust
+    // Required for HTTPS. Pin the server certificate's SPKI SHA-256 hash.
     PinnedSPKIHashes: []string{
         "base64-spki-primary",
         "base64-spki-rotation",
     },
+
+    // Development-only escape hatch. Do not enable this for production SDKs
+    // unless your deployment explicitly accepts system CA trust instead of SPKI pinning.
     AllowSystemTrust: false,
 }
 ```

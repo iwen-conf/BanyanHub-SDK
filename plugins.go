@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 )
 
 type PluginInfo struct {
@@ -29,6 +30,26 @@ type PluginCatalog struct {
 	SourceArch   string       `json:"source_arch"`
 	UpdateFrozen bool         `json:"update_frozen"`
 	Plugins      []PluginInfo `json:"plugins"`
+}
+
+type PluginUpdateOptions struct {
+	Version string
+	OS      string
+	Arch    string
+}
+
+type PluginUpdatePackage struct {
+	Message         string  `json:"message"`
+	Plugin          string  `json:"plugin"`
+	CurrentVersion  *string `json:"current_version"`
+	TargetVersion   string  `json:"target_version"`
+	UpdateAvailable bool    `json:"update_available"`
+	DownloadURL     string  `json:"download_url"`
+	SHA256          string  `json:"sha256"`
+	Signature       string  `json:"signature"`
+	SizeBytes       int64   `json:"size_bytes"`
+	ReleaseNotes    *string `json:"release_notes"`
+	ExpiresIn       int     `json:"expires_in"`
 }
 
 // GetPluginCatalog fetches discoverable plugins and update availability for this machine.
@@ -74,6 +95,32 @@ func (g *Guard) CheckPluginUpdates(ctx context.Context) ([]PluginInfo, error) {
 		}
 	}
 	return updates, nil
+}
+
+// RequestPluginUpdate asks the server for a short-lived download package for one plugin.
+func (g *Guard) RequestPluginUpdate(ctx context.Context, slug string, options PluginUpdateOptions) (*PluginUpdatePackage, error) {
+	if slug == "" {
+		return nil, fmt.Errorf("plugin slug is required")
+	}
+
+	osValue, archValue := g.resolveOTAPlatform(options.OS, options.Arch)
+	body := map[string]any{
+		"license_key":  g.cfg.LicenseKey,
+		"machine_id":   g.fingerprint.MachineID(),
+		"project_slug": g.cfg.ProjectSlug,
+		"os":           osValue,
+		"arch":         archValue,
+	}
+	if strings.TrimSpace(options.Version) != "" {
+		body["version"] = strings.TrimSpace(options.Version)
+	}
+
+	var resp PluginUpdatePackage
+	path := "/api/v1/plugins/" + url.PathEscape(slug) + "/update"
+	if err := g.postJSON(ctx, path, body, &resp); err != nil {
+		return nil, fmt.Errorf("request plugin update: %w", err)
+	}
+	return &resp, nil
 }
 
 // UpdatePlugin performs a manual update for one plugin.
@@ -154,6 +201,24 @@ func (g *Guard) UpdatePlugin(ctx context.Context, slug string) error {
 	}
 
 	return nil
+}
+
+func (g *Guard) resolveOTAPlatform(osOverride string, archOverride string) (string, string) {
+	osValue := strings.TrimSpace(osOverride)
+	archValue := strings.TrimSpace(archOverride)
+	if osValue == "" {
+		osValue = strings.TrimSpace(g.cfg.OTA.OS)
+	}
+	if archValue == "" {
+		archValue = strings.TrimSpace(g.cfg.OTA.Arch)
+	}
+	if osValue == "" {
+		osValue = "universal"
+	}
+	if archValue == "" {
+		archValue = "universal"
+	}
+	return osValue, archValue
 }
 
 func (g *Guard) findManagedComponent(slug string) (ManagedComponent, bool) {
