@@ -3,17 +3,23 @@ package sdk
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/ed25519"
+	"crypto/tls"
 	"crypto/rand"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -21,9 +27,11 @@ import (
 type Guard struct {
 	cfg         Config
 	publicKey   ed25519.PublicKey
+	publicKeys  []ed25519.PublicKey
 	fingerprint *Fingerprint
 	sm          *stateMachine
 	httpClient  *http.Client
+	store       *persistentStateStore
 
 	version         string
 	managedVersions map[string]string
@@ -50,18 +58,30 @@ func New(cfg Config) (*Guard, error) {
 	if cfg.ComponentSlug == "" {
 		return nil, fmt.Errorf("component_slug is required")
 	}
-	block, _ := pem.Decode(cfg.PublicKeyPEM)
-	if block == nil {
-		return nil, fmt.Errorf("failed to decode public key PEM")
+	pubKeys, err := decodePublicKeys(cfg.PublicKeyPEM, cfg.LegacyPublicKeysPEM)
+	if err != nil {
+		return nil, err
 	}
-	if len(block.Bytes) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("invalid ed25519 public key size: got %d, want %d", len(block.Bytes), ed25519.PublicKeySize)
-	}
-	pubKey := ed25519.PublicKey(block.Bytes)
 
 	fp, err := collectFingerprint()
 	if err != nil {
 		return nil, fmt.Errorf("collect fingerprint: %w", err)
+	}
+
+	httpClient, err := newPinnedHTTPClient(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	store := newPersistentStateStore(cfg, fp)
+	loadedState, err := store.Load()
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		loadedState = &persistedState{
+			LockFlag:  true,
+			UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+		}
+		_ = store.Save(loadedState)
+		err = nil
 	}
 
 	managedVersions := make(map[string]string, len(cfg.ManagedComponents))
@@ -69,12 +89,19 @@ func New(cfg Config) (*Guard, error) {
 		managedVersions[mc.Slug] = "unknown"
 	}
 
+	sm := newStateMachine()
+	if loadedState != nil {
+		sm.restore(loadedState)
+	}
+
 	return &Guard{
 		cfg:             cfg,
-		publicKey:       pubKey,
+		publicKey:       pubKeys[0],
+		publicKeys:      pubKeys,
 		fingerprint:     fp,
-		sm:              newStateMachine(),
-		httpClient:      &http.Client{},
+		sm:              sm,
+		httpClient:      httpClient,
+		store:           store,
 		version:         "unknown",
 		managedVersions: managedVersions,
 		logger:          slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -89,7 +116,6 @@ func (g *Guard) Start(ctx context.Context) error {
 		cancel()
 		return fmt.Errorf("license verification failed: %w", err)
 	}
-	g.sm.OnVerifySuccess()
 
 	g.startHeartbeat(ctx)
 
@@ -115,6 +141,44 @@ func (g *Guard) Check() error {
 	default:
 		return ErrNotActivated
 	}
+}
+
+func (g *Guard) Unseal(box []byte) ([]byte, error) {
+	leaseState, err := g.currentActiveLease()
+	if err != nil {
+		return nil, err
+	}
+
+	aead, err := newLeaseAEAD(leaseState.LeaseSignature, leaseState.Lease)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrHardBindingUnavailable, err)
+	}
+
+	nonceSize := aead.NonceSize()
+	if len(box) < nonceSize {
+		return nil, ErrHardBindingUnavailable
+	}
+
+	nonce := box[:nonceSize]
+	ciphertext := box[nonceSize:]
+	plaintext, err := aead.Open(nil, nonce, ciphertext, leaseAAD(leaseState.Lease))
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrHardBindingUnavailable, err)
+	}
+	return plaintext, nil
+}
+
+func (g *Guard) FeatureToken(name string) (string, error) {
+	leaseState, err := g.currentActiveLease()
+	if err != nil {
+		return "", err
+	}
+
+	token, err := deriveFeatureToken(leaseState.LeaseSignature, leaseState.Lease, name)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrHardBindingUnavailable, err)
+	}
+	return token, nil
 }
 
 func (g *Guard) State() State {
@@ -207,6 +271,35 @@ func (g *Guard) SetLogger(logger *slog.Logger) {
 	}
 }
 
+func (g *Guard) currentLeaseState() *persistedState {
+	if g.store == nil {
+		return nil
+	}
+	return g.store.Snapshot()
+}
+
+func (g *Guard) currentActiveLease() (*persistedState, error) {
+	if state := g.currentLeaseState(); state != nil {
+		switch g.sm.Current() {
+		case StateActive, StateGrace:
+			if state.Lease != nil && state.LeaseSignature != "" {
+				return state, nil
+			}
+		}
+	}
+	return nil, ErrLeaseUnavailable
+}
+
+func (g *Guard) verificationKeys() []ed25519.PublicKey {
+	if len(g.publicKeys) > 0 {
+		return g.publicKeys
+	}
+	if len(g.publicKey) > 0 {
+		return []ed25519.PublicKey{g.publicKey}
+	}
+	return nil
+}
+
 // postJSON sends a JSON POST request to the server and decodes the response.
 func (g *Guard) postJSON(ctx context.Context, path string, body any, result any) error {
 	data, err := json.Marshal(body)
@@ -286,4 +379,88 @@ func nowRFC3339() string {
 func hostname() string {
 	h, _ := os.Hostname()
 	return h
+}
+
+func decodePublicKeys(primary []byte, legacy [][]byte) ([]ed25519.PublicKey, error) {
+	keys := make([]ed25519.PublicKey, 0, 1+len(legacy))
+	candidates := append([][]byte{primary}, legacy...)
+	for _, pemBytes := range candidates {
+		if len(bytes.TrimSpace(pemBytes)) == 0 {
+			continue
+		}
+		block, _ := pem.Decode(pemBytes)
+		if block == nil {
+			return nil, fmt.Errorf("failed to decode public key PEM")
+		}
+		if len(block.Bytes) != ed25519.PublicKeySize {
+			return nil, fmt.Errorf("invalid ed25519 public key size: got %d, want %d", len(block.Bytes), ed25519.PublicKeySize)
+		}
+		key := ed25519.PublicKey(append([]byte(nil), block.Bytes...))
+		keys = append(keys, key)
+	}
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("no valid ed25519 public keys configured")
+	}
+	return keys, nil
+}
+
+func newPinnedHTTPClient(cfg Config) (*http.Client, error) {
+	pins := cfg.PinnedSPKIHashes
+	if cfg.AllowSystemTrust {
+		return &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					MinVersion: tls.VersionTLS12,
+				},
+			},
+		}, nil
+	}
+	normalizedPins := make(map[string]struct{}, len(pins))
+	for _, pin := range pins {
+		normalized := strings.TrimSpace(pin)
+		if normalized == "" {
+			continue
+		}
+		normalizedPins[normalized] = struct{}{}
+	}
+	tlsCfg := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			if len(normalizedPins) == 0 {
+				return ErrTLSPinNotConfigured
+			}
+			if len(cs.PeerCertificates) == 0 {
+				return ErrTLSPinMismatch
+			}
+			sum := sha256.Sum256(cs.PeerCertificates[0].RawSubjectPublicKeyInfo)
+			actual := base64.StdEncoding.EncodeToString(sum[:])
+			if _, ok := normalizedPins[actual]; ok {
+				return nil
+			}
+			return fmt.Errorf("%w: got %s", ErrTLSPinMismatch, actual)
+		},
+	}
+
+	if pool, err := x509.SystemCertPool(); err == nil && pool != nil {
+		tlsCfg.RootCAs = pool
+	}
+
+	return &http.Client{
+		Transport: &pinEnforcingTransport{
+			base: &http.Transport{
+				TLSClientConfig: tlsCfg,
+			},
+		},
+	}, nil
+}
+
+type pinEnforcingTransport struct {
+	base http.RoundTripper
+}
+
+func (p *pinEnforcingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL != nil && req.URL.Scheme == "https" && p.base == nil {
+		return nil, ErrTLSPinNotConfigured
+	}
+	return p.base.RoundTrip(req)
 }

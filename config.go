@@ -13,6 +13,7 @@ type Config struct {
 	ServerURL    string
 	LicenseKey   string
 	PublicKeyPEM []byte
+	LegacyPublicKeysPEM [][]byte
 
 	ProjectSlug   string
 	ComponentSlug string
@@ -21,6 +22,8 @@ type Config struct {
 	GracePolicy       GracePolicy
 	OTA               OTAConfig
 	ManagedComponents []ManagedComponent
+	AllowSystemTrust  bool
+	PinnedSPKIHashes  []string
 }
 
 type GracePolicy struct {

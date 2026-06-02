@@ -10,6 +10,7 @@ import (
 )
 
 func TestNew_Success(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
 	pubKeyPEM := pemEncodePublicKey(pubKey)
 
@@ -36,6 +37,7 @@ func TestNew_Success(t *testing.T) {
 }
 
 func TestNew_MissingParameters(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
 	pubKeyPEM := pemEncodePublicKey(pubKey)
 

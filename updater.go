@@ -4,9 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
-	"crypto/ed25519"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -15,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/creativeprojects/go-selfupdate/update"
 )
 
@@ -100,6 +99,16 @@ func (g *Guard) updateBinaryComponent(
 	defer g.updateMu.Unlock()
 
 	oldVersion := getCurrentVersion()
+	if !isStrictlyNewerVersion(oldVersion, u.Latest) {
+		err := ErrUpdateDowngrade
+		if g.cfg.OTA.OnUpdateFailure != nil {
+			g.cfg.OTA.OnUpdateFailure(componentSlug, err)
+		}
+		if g.cfg.OTA.OnUpdateResult != nil {
+			g.cfg.OTA.OnUpdateResult(componentSlug, oldVersion, u.Latest, false, err)
+		}
+		return
+	}
 
 	g.logger.Info("starting backend update", "component", componentSlug, "old_version", oldVersion, "new_version", u.Latest)
 
@@ -281,17 +290,7 @@ func (g *Guard) downloadArtifactWithProgress(downloadURL string, maxBytes int64)
 }
 
 func (g *Guard) verifySignature(data, signatureB64 string) error {
-	sig, err := base64.StdEncoding.DecodeString(signatureB64)
-	if err != nil {
-		return fmt.Errorf("decode signature: %w", err)
-	}
-
-	digest := sha256.Sum256([]byte(data))
-	if !ed25519.Verify(g.publicKey, digest[:], sig) {
-		return fmt.Errorf("signature verification failed")
-	}
-
-	return nil
+	return verifyEd25519Digest([]byte(data), signatureB64, g.verificationKeys())
 }
 
 func (g *Guard) applyBackendBinaryWithSelfupdate(tmpPath, targetPath string) error {
@@ -322,6 +321,13 @@ func (g *Guard) updateFrontend(mc ManagedComponent, u updateInfo) {
 	defer g.updateMu.Unlock()
 
 	g.logger.Info("starting frontend update", "component", mc.Slug, "version", u.Latest)
+
+	if !isStrictlyNewerVersion(g.currentManagedVersion(mc.Slug), u.Latest) {
+		if g.cfg.OTA.OnUpdateFailure != nil {
+			g.cfg.OTA.OnUpdateFailure(mc.Slug, ErrUpdateDowngrade)
+		}
+		return
+	}
 
 	if g.cfg.OTA.OnUpdateProgress != nil {
 		g.cfg.OTA.OnUpdateProgress(mc.Slug, "requesting", 0.0)
@@ -531,4 +537,13 @@ func (g *Guard) updateFrontend(mc ManagedComponent, u updateInfo) {
 			_ = err
 		}
 	}
+}
+
+func isStrictlyNewerVersion(current, target string) bool {
+	currentVersion, currentErr := semver.NewVersion(strings.TrimSpace(strings.TrimPrefix(current, "v")))
+	targetVersion, targetErr := semver.NewVersion(strings.TrimSpace(strings.TrimPrefix(target, "v")))
+	if currentErr != nil || targetErr != nil {
+		return target != "" && target != current
+	}
+	return targetVersion.GreaterThan(currentVersion)
 }

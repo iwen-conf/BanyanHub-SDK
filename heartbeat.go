@@ -2,10 +2,34 @@ package sdk
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"time"
 )
+
+type heartbeatResponse struct {
+	Status            string          `json:"status"`
+	Lease             json.RawMessage `json:"lease"`
+	LeaseSignature    string          `json:"lease_signature"`
+	ResponseSignature string          `json:"response_signature"`
+	Nonce             string          `json:"nonce"`
+	ServerTime        string          `json:"server_time"`
+	Updates           []updateInfo    `json:"updates"`
+	Reason            string          `json:"reason"`
+	Message           string          `json:"message"`
+}
+
+type updateInfo struct {
+	Component       string `json:"component"`
+	Current         string `json:"current"`
+	Latest          string `json:"latest"`
+	UpdateAvailable bool   `json:"update_available"`
+	Mandatory       bool   `json:"mandatory"`
+	ReleaseNotes    string `json:"release_notes"`
+}
 
 func (g *Guard) startHeartbeat(ctx context.Context) {
 	interval := g.cfg.HeartbeatInterval
@@ -29,17 +53,18 @@ func (g *Guard) startHeartbeat(ctx context.Context) {
 
 			if isFatalError(err) {
 				g.sm.OnKill()
+				_ = g.persistBan()
 				return
 			}
 
-			// Network error → enter grace
 			g.sm.OnHeartbeatFail()
+			_ = g.persistGrace()
 			if graceStart.IsZero() {
 				graceStart = time.Now()
 			}
-
 			if time.Since(graceStart) > g.cfg.GracePolicy.MaxOfflineDuration {
 				g.sm.OnGracePeriodExpired()
+				_ = g.persistLock()
 				return
 			}
 		}
@@ -47,7 +72,6 @@ func (g *Guard) startHeartbeat(ctx context.Context) {
 }
 
 func (g *Guard) sendHeartbeat() error {
-	// Snapshot version info under lock to avoid race
 	g.mu.RLock()
 	currentVersion := g.version
 	managedVersionsSnapshot := make(map[string]string, len(g.managedVersions))
@@ -62,7 +86,6 @@ func (g *Guard) sendHeartbeat() error {
 			"version": currentVersion,
 		},
 	}
-
 	for _, mc := range g.cfg.ManagedComponents {
 		components = append(components, map[string]string{
 			"slug":    mc.Slug,
@@ -70,55 +93,135 @@ func (g *Guard) sendHeartbeat() error {
 		})
 	}
 
+	binaryHash, err := GetBinaryHash()
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrNetworkError, err)
+	}
+	nonce := randomNonce()
 	reqBody := map[string]any{
 		"license_key":  g.cfg.LicenseKey,
 		"machine_id":   g.fingerprint.MachineID(),
 		"project_slug": g.cfg.ProjectSlug,
+		"component_slug": g.cfg.ComponentSlug,
 		"components":   components,
+		"nonce":        nonce,
+		"timestamp":    nowUnix(),
+		"binary_hash":  binaryHash,
 	}
 
 	var resp heartbeatResponse
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
 	if err := g.postJSON(ctx, "/api/v1/heartbeat", reqBody, &resp); err != nil {
 		return fmt.Errorf("%w: %v", ErrNetworkError, err)
 	}
 
+	if err := g.verifyHeartbeatResponse(resp, nonce); err != nil {
+		return err
+	}
 	if resp.Status == "kill" {
 		g.sm.OnKill()
+		_ = g.persistBan()
 		return ErrBanned
 	}
 
-	// Process update notifications
-	if g.cfg.OTA.Enabled && !resp.UpdateFrozen {
-		for _, u := range resp.Updates {
-			if u.UpdateAvailable {
-				g.handleUpdateNotification(u)
-			}
+	leaseValue, err := parseAndVerifyLease(resp.Lease, resp.LeaseSignature, g.verificationKeys(), g.fingerprint.MachineID(), time.Now(), g.currentWatermark())
+	if err != nil {
+		return err
+	}
+	if err := g.acceptLease(leaseValue, resp.LeaseSignature, false); err != nil {
+		return err
+	}
+
+	for _, u := range resp.Updates {
+		if g.cfg.OTA.Enabled && u.UpdateAvailable {
+			g.handleUpdateNotification(u)
 		}
 	}
 
 	return nil
 }
 
-type heartbeatResponse struct {
-	Status       string           `json:"status"`
-	ServerTime   string           `json:"server_time"`
-	NextInterval int              `json:"next_interval_s"`
-	UpdateFrozen bool             `json:"update_frozen"`
-	Updates      []updateInfo     `json:"updates"`
-	Reason       string           `json:"reason"`
-	Message      string           `json:"message"`
+func (g *Guard) verifyHeartbeatResponse(resp heartbeatResponse, requestNonce string) error {
+	if resp.ResponseSignature == "" {
+		return ErrHeartbeatInvalid
+	}
+	if resp.Nonce != requestNonce {
+		return ErrHeartbeatNonceMismatch
+	}
+
+	payload := map[string]any{
+		"lease":           mustJSONObject(resp.Lease),
+		"lease_signature": resp.LeaseSignature,
+		"nonce":           resp.Nonce,
+		"server_time":     resp.ServerTime,
+		"status":          resp.Status,
+		"updates_digest":  updatesDigest(resp.Updates),
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return ErrHeartbeatInvalid
+	}
+	canonical, err := canonicalJSON(raw)
+	if err != nil {
+		return ErrHeartbeatInvalid
+	}
+	if err := verifyEd25519Digest(canonical, resp.ResponseSignature, g.verificationKeys()); err != nil {
+		return ErrHeartbeatInvalid
+	}
+	return nil
 }
 
-type updateInfo struct {
-	Component       string `json:"component"`
-	Current         string `json:"current"`
-	Latest          string `json:"latest"`
-	UpdateAvailable bool   `json:"update_available"`
-	Mandatory       bool   `json:"mandatory"`
-	ReleaseNotes    string `json:"release_notes"`
+func mustJSONObject(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return map[string]any{}
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return map[string]any{}
+	}
+	return value
+}
+
+func updatesDigest(updates []updateInfo) string {
+	if len(updates) == 0 {
+		updates = []updateInfo{}
+	}
+	raw, _ := json.Marshal(updates)
+	canonical, err := canonicalJSON(raw)
+	if err != nil {
+		sum := sha256.Sum256(raw)
+		return hex.EncodeToString(sum[:])
+	}
+	sum := sha256.Sum256(canonical)
+	return hex.EncodeToString(sum[:])
+}
+
+func (g *Guard) persistBan() error {
+	state := g.currentLeaseState()
+	if state == nil {
+		state = &persistedState{}
+	}
+	state.BanFlag = true
+	state.LockFlag = false
+	return g.store.Save(state)
+}
+
+func (g *Guard) persistLock() error {
+	state := g.currentLeaseState()
+	if state == nil {
+		state = &persistedState{}
+	}
+	state.LockFlag = true
+	return g.store.Save(state)
+}
+
+func (g *Guard) persistGrace() error {
+	state := g.currentLeaseState()
+	if state == nil {
+		return nil
+	}
+	return g.store.Save(state)
 }
 
 func isFatalError(err error) bool {

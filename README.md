@@ -70,6 +70,7 @@ func main() {
 | **CDK Activation** | Exchange activation codes for license keys (self-service provisioning) |
 | **User Feedback** | Submit bug reports/suggestions with file attachments, track resolution |
 | **Central Versioning** | Auto-resolve app version via binary SHA256 hash — no manual config needed |
+| **Hard Binding** | Lease-derived `Unseal` + `FeatureToken` APIs make runtime config and feature proofs unavailable without a valid lease |
 
 ## CDK Activation
 
@@ -129,8 +130,40 @@ sdk.Config{
             },
         },
     },
+
+    // Optional: extra verification material
+    LegacyPublicKeysPEM: [][]byte{legacyPublicKeyPEM},
+
+    // Required for HTTPS pinning unless you explicitly allow system trust
+    PinnedSPKIHashes: []string{
+        "base64-spki-primary",
+        "base64-spki-rotation",
+    },
+    AllowSystemTrust: false,
 }
 ```
+
+## Hard Binding
+
+`Check()` is no longer enough for commercial integrations. Move a real secret or config blob behind `Unseal`, and use `FeatureToken` for downstream proofs:
+
+```go
+box, _ := os.ReadFile("config.sealed")
+sealed, _ := base64.StdEncoding.DecodeString(strings.TrimSpace(string(box)))
+
+cfgJSON, err := guard.Unseal(sealed)
+if err != nil {
+    log.Fatal(err)
+}
+
+token, err := guard.FeatureToken("runtime-config")
+if err != nil {
+    log.Fatal(err)
+}
+_ = token
+```
+
+See [examples/hardbinding/README.md](./examples/hardbinding/README.md) for the provisioning workflow.
 
 ## State Machine
 

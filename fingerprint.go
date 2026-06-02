@@ -4,12 +4,11 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"net"
+	"os/exec"
 	"runtime"
 	"strings"
 
 	"github.com/denisbrodbeck/machineid"
-	"github.com/shirou/gopsutil/v4/cpu"
-	"github.com/shirou/gopsutil/v4/mem"
 )
 
 type Fingerprint struct {
@@ -30,14 +29,8 @@ func collectFingerprint() (*Fingerprint, error) {
 	aux["os"] = runtime.GOOS
 	aux["arch"] = runtime.GOARCH
 
-	if infos, err := cpu.Info(); err == nil && len(infos) > 0 {
-		aux["cpu_model"] = infos[0].ModelName
-		aux["cpu_cores"] = fmt.Sprintf("%d", infos[0].Cores)
-	}
-
-	if vmem, err := mem.VirtualMemory(); err == nil {
-		aux["total_ram_mb"] = fmt.Sprintf("%d", vmem.Total/1024/1024)
-	}
+	populateCPUInfo(aux)
+	populateMemoryInfo(aux)
 
 	if macs := getMACAddresses(); len(macs) > 0 {
 		aux["mac_addresses"] = strings.Join(macs, ",")
@@ -73,4 +66,45 @@ func getMACAddresses() []string {
 		}
 	}
 	return macs
+}
+
+func populateCPUInfo(aux map[string]string) {
+	switch runtime.GOOS {
+	case "darwin":
+		if model, err := runCommand("sysctl", "-n", "machdep.cpu.brand_string"); err == nil && model != "" {
+			aux["cpu_model"] = model
+		}
+		if cores, err := runCommand("sysctl", "-n", "hw.physicalcpu"); err == nil && cores != "" {
+			aux["cpu_cores"] = cores
+		}
+	default:
+		if cores, err := runCommand("getconf", "_NPROCESSORS_ONLN"); err == nil && cores != "" {
+			aux["cpu_cores"] = cores
+		}
+	}
+}
+
+func populateMemoryInfo(aux map[string]string) {
+	switch runtime.GOOS {
+	case "darwin":
+		if bytes, err := runCommand("sysctl", "-n", "hw.memsize"); err == nil && bytes != "" {
+			aux["total_ram_mb"] = bytesToMBString(bytes)
+		}
+	}
+}
+
+func runCommand(name string, args ...string) (string, error) {
+	out, err := exec.Command(name, args...).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func bytesToMBString(value string) string {
+	var bytes uint64
+	if _, err := fmt.Sscanf(strings.TrimSpace(value), "%d", &bytes); err != nil || bytes == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d", bytes/1024/1024)
 }
