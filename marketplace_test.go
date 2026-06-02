@@ -47,6 +47,18 @@ func TestMarketplaceCatalogDetailReviews(t *testing.T) {
 			if got := r.URL.Query().Get("search"); got != "demo" {
 				t.Fatalf("unexpected search query: %s", got)
 			}
+			if got := r.URL.Query().Get("target"); got != "backend" {
+				t.Fatalf("unexpected target query: %s", got)
+			}
+			if got := r.URL.Query().Get("scope"); got != "extension" {
+				t.Fatalf("unexpected scope query: %s", got)
+			}
+			if got := r.URL.Query().Get("os"); got != "linux" {
+				t.Fatalf("unexpected os query: %s", got)
+			}
+			if got := r.URL.Query().Get("arch"); got != "amd64" {
+				t.Fatalf("unexpected arch query: %s", got)
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"page":      1,
 				"page_size": 20,
@@ -60,6 +72,15 @@ func TestMarketplaceCatalogDetailReviews(t *testing.T) {
 						"current_version":    "1.0.0",
 						"package_size_bytes": 1234,
 						"screenshots":        []string{},
+						"target":             "backend",
+						"scope":              "extension",
+						"manifest":           map[string]any{"entry": "plugin.js"},
+						"os":                 []string{"linux"},
+						"arch":               []string{"amd64"},
+						"sdk_version_req":    ">=1.0.0",
+						"permissions":        []string{"net.http"},
+						"dependencies":       map[string]string{"runtime": ">=1.0.0"},
+						"config_schema":      map[string]any{"type": "object"},
 						"status":             "published",
 						"created_at":         "2026-01-01T00:00:00Z",
 						"updated_at":         "2026-01-02T00:00:00Z",
@@ -127,6 +148,10 @@ func TestMarketplaceCatalogDetailReviews(t *testing.T) {
 
 	catalog, err := guard.GetMarketplaceCatalog(context.Background(), MarketplaceBrowseOptions{
 		Type:   "template",
+		Target: "backend",
+		Scope:  "extension",
+		OS:     "linux",
+		Arch:   "amd64",
 		Search: "demo",
 	})
 	if err != nil {
@@ -137,6 +162,18 @@ func TestMarketplaceCatalogDetailReviews(t *testing.T) {
 	}
 	if catalog.Items[0].Slug != "demo" {
 		t.Fatalf("unexpected item slug: %s", catalog.Items[0].Slug)
+	}
+	if catalog.Items[0].Target == nil || *catalog.Items[0].Target != "backend" {
+		t.Fatalf("unexpected item target: %#v", catalog.Items[0].Target)
+	}
+	if catalog.Items[0].Scope == nil || *catalog.Items[0].Scope != "extension" {
+		t.Fatalf("unexpected item scope: %#v", catalog.Items[0].Scope)
+	}
+	if len(catalog.Items[0].OS) != 1 || catalog.Items[0].OS[0] != "linux" {
+		t.Fatalf("unexpected item os: %#v", catalog.Items[0].OS)
+	}
+	if catalog.Items[0].ConfigSchema["type"] != "object" {
+		t.Fatalf("unexpected config schema: %#v", catalog.Items[0].ConfigSchema)
 	}
 
 	detail, err := guard.GetMarketplaceItem(context.Background(), "demo")
@@ -240,6 +277,84 @@ func TestMarketplaceInstallUninstallReview(t *testing.T) {
 	}
 	if reviewResp.ItemSlug != "demo" || reviewResp.Stats.RatingCount != 3 {
 		t.Fatalf("unexpected review submit response: %#v", reviewResp)
+	}
+}
+
+func TestMarketplaceConfigureAndStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/marketplace/demo/configure":
+			if r.Method != http.MethodPost {
+				t.Fatalf("unexpected configure method: %s", r.Method)
+			}
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode configure body: %v", err)
+			}
+			if body["license_key"] != "LIC-TEST-001" {
+				t.Fatalf("unexpected configure license key: %v", body["license_key"])
+			}
+			if body["project_slug"] != "demo-project" {
+				t.Fatalf("unexpected configure project slug: %v", body["project_slug"])
+			}
+			if body["machine_id"] == "" {
+				t.Fatalf("missing configure machine_id")
+			}
+			config, ok := body["config"].(map[string]any)
+			if !ok {
+				t.Fatalf("missing config object: %#v", body["config"])
+			}
+			if config["mode"] != "strict" || config["retries"] != float64(3) {
+				t.Fatalf("unexpected config payload: %#v", config)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"message": "configured",
+				"slug":    "demo",
+			})
+		case "/api/v1/marketplace/demo/status":
+			if r.Method != http.MethodPost {
+				t.Fatalf("unexpected status method: %s", r.Method)
+			}
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode status body: %v", err)
+			}
+			if body["license_key"] != "LIC-TEST-001" {
+				t.Fatalf("unexpected status license key: %v", body["license_key"])
+			}
+			if body["project_slug"] != "demo-project" {
+				t.Fatalf("unexpected status project slug: %v", body["project_slug"])
+			}
+			if body["machine_id"] == "" {
+				t.Fatalf("missing status machine_id")
+			}
+			if body["is_active"] != false {
+				t.Fatalf("unexpected active status: %v", body["is_active"])
+			}
+			if body["error_message"] != "startup failed" {
+				t.Fatalf("unexpected error message: %v", body["error_message"])
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"message":   "status_updated",
+				"slug":      "demo",
+				"is_active": false,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	guard := newMarketplaceTestGuard(t, srv.URL)
+	if err := guard.ConfigureMarketplaceItem(context.Background(), "demo", map[string]any{
+		"mode":    "strict",
+		"retries": 3,
+	}); err != nil {
+		t.Fatalf("configure marketplace item: %v", err)
+	}
+
+	if err := guard.ReportMarketplaceStatus(context.Background(), "demo", false, " startup failed "); err != nil {
+		t.Fatalf("report marketplace status: %v", err)
 	}
 }
 

@@ -34,6 +34,15 @@ type MarketplaceItem struct {
 	PackageSizeBytes int64                `json:"package_size_bytes"`
 	ThumbnailKey     *string              `json:"thumbnail_key"`
 	Screenshots      []string             `json:"screenshots"`
+	Target           *string              `json:"target"`
+	Scope            *string              `json:"scope"`
+	Manifest         map[string]any       `json:"manifest"`
+	OS               []string             `json:"os"`
+	Arch             []string             `json:"arch"`
+	SDKVersionReq    *string              `json:"sdk_version_req"`
+	Permissions      []string             `json:"permissions"`
+	Dependencies     map[string]string    `json:"dependencies"`
+	ConfigSchema     map[string]any       `json:"config_schema"`
 	Status           string               `json:"status"`
 	CreatedAt        string               `json:"created_at"`
 	UpdatedAt        string               `json:"updated_at"`
@@ -98,6 +107,10 @@ type MarketplaceReviewSubmitResult struct {
 type MarketplaceBrowseOptions struct {
 	Type     string
 	Category string
+	Target   string
+	Scope    string
+	OS       string
+	Arch     string
 	Search   string
 	Sort     string
 	Page     int
@@ -225,6 +238,18 @@ func (g *Guard) GetMarketplaceCatalog(ctx context.Context, options MarketplaceBr
 	if options.Category != "" {
 		query.Set("category", options.Category)
 	}
+	if options.Target != "" {
+		query.Set("target", options.Target)
+	}
+	if options.Scope != "" {
+		query.Set("scope", options.Scope)
+	}
+	if options.OS != "" {
+		query.Set("os", options.OS)
+	}
+	if options.Arch != "" {
+		query.Set("arch", options.Arch)
+	}
 	if options.Search != "" {
 		query.Set("search", options.Search)
 	}
@@ -315,6 +340,42 @@ func (g *Guard) UninstallMarketplaceItem(ctx context.Context, slug string) error
 	path := "/api/v1/marketplace/" + url.PathEscape(slug) + "/uninstall"
 	if err := g.marketplaceRequest(ctx, http.MethodPost, path, nil, g.marketplaceAccessBody(), nil); err != nil {
 		return fmt.Errorf("uninstall marketplace item: %w", err)
+	}
+	return nil
+}
+
+func (g *Guard) ConfigureMarketplaceItem(ctx context.Context, slug string, config map[string]any) error {
+	if slug == "" {
+		return fmt.Errorf("marketplace slug is required")
+	}
+	if config == nil {
+		config = map[string]any{}
+	}
+
+	body := g.marketplaceAccessBody()
+	body["config"] = config
+
+	path := "/api/v1/marketplace/" + url.PathEscape(slug) + "/configure"
+	if err := g.marketplaceRequest(ctx, http.MethodPost, path, nil, body, nil); err != nil {
+		return fmt.Errorf("configure marketplace item: %w", err)
+	}
+	return nil
+}
+
+func (g *Guard) ReportMarketplaceStatus(ctx context.Context, slug string, isActive bool, errorMessage string) error {
+	if slug == "" {
+		return fmt.Errorf("marketplace slug is required")
+	}
+
+	body := g.marketplaceAccessBody()
+	body["is_active"] = isActive
+	if strings.TrimSpace(errorMessage) != "" {
+		body["error_message"] = strings.TrimSpace(errorMessage)
+	}
+
+	path := "/api/v1/marketplace/" + url.PathEscape(slug) + "/status"
+	if err := g.marketplaceRequest(ctx, http.MethodPost, path, nil, body, nil); err != nil {
+		return fmt.Errorf("report marketplace status: %w", err)
 	}
 	return nil
 }

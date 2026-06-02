@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 // ---------------------------------------------------------------------------
@@ -57,16 +58,16 @@ type FeedbackAttachment struct {
 
 // FeedbackItem represents a single feedback entry returned by the server.
 type FeedbackItem struct {
-	ID          string                 `json:"id"`
-	Category    FeedbackCategory       `json:"category"`
-	Status      FeedbackStatus         `json:"status"`
-	Title       string                 `json:"title"`
-	Content     string                 `json:"content"`
-	AppVersion  string                 `json:"app_version,omitempty"`
+	ID          string                   `json:"id"`
+	Category    FeedbackCategory         `json:"category"`
+	Status      FeedbackStatus           `json:"status"`
+	Title       string                   `json:"title"`
+	Content     string                   `json:"content"`
+	AppVersion  string                   `json:"app_version,omitempty"`
 	Attachments []FeedbackAttachmentInfo `json:"attachments,omitempty"`
-	Replies     []FeedbackReply        `json:"replies,omitempty"`
-	CreatedAt   string                 `json:"created_at"`
-	UpdatedAt   string                 `json:"updated_at"`
+	Replies     []FeedbackReply          `json:"replies,omitempty"`
+	CreatedAt   string                   `json:"created_at"`
+	UpdatedAt   string                   `json:"updated_at"`
 }
 
 // FeedbackAttachmentInfo is the server-side representation of an attachment.
@@ -102,9 +103,9 @@ type FeedbackListPagination struct {
 }
 
 // convenience accessors for backward compatibility
-func (r *FeedbackListResponse) Total() int    { return r.Pagination.Total }
-func (r *FeedbackListResponse) PageNum() int  { return r.Pagination.Page }
-func (r *FeedbackListResponse) Size() int     { return r.Pagination.PageSize }
+func (r *FeedbackListResponse) Total() int   { return r.Pagination.Total }
+func (r *FeedbackListResponse) PageNum() int { return r.Pagination.Page }
+func (r *FeedbackListResponse) Size() int    { return r.Pagination.PageSize }
 
 // UploadURLResponse is returned after a successful attachment upload.
 type UploadURLResponse struct {
@@ -114,6 +115,7 @@ type UploadURLResponse struct {
 
 // ReleaseNoteEntry represents a single version's release notes.
 type ReleaseNoteEntry struct {
+	ComponentSlug     string             `json:"component_slug,omitempty"`
 	Version           string             `json:"version"`
 	ReleaseNotes      string             `json:"release_notes"`
 	ResolvedFeedbacks []ResolvedFeedback `json:"resolved_feedbacks,omitempty"`
@@ -139,14 +141,14 @@ type ReleaseNotesResponse struct {
 // SubmitFeedback submits a new feedback item to BanyanHub.
 func (g *Guard) SubmitFeedback(ctx context.Context, req SubmitFeedbackRequest) (*FeedbackItem, error) {
 	body := map[string]any{
-		"license_key":   g.cfg.LicenseKey,
-		"machine_id":    g.fingerprint.MachineID(),
-		"project_slug":  g.cfg.ProjectSlug,
-		"user_id":       req.UserID,
-		"user_name":     req.UserName,
-		"category":      req.Category,
-		"title":         req.Title,
-		"content":       req.Content,
+		"license_key":  g.cfg.LicenseKey,
+		"machine_id":   g.fingerprint.MachineID(),
+		"project_slug": g.cfg.ProjectSlug,
+		"user_id":      req.UserID,
+		"user_name":    req.UserName,
+		"category":     req.Category,
+		"title":        req.Title,
+		"content":      req.Content,
 	}
 	if req.UserEmail != "" {
 		body["user_email"] = req.UserEmail
@@ -184,6 +186,14 @@ func (g *Guard) ListMyFeedback(ctx context.Context, userID string, page, pageSiz
 // The returned UploadURLResponse contains the file_key to reference in
 // SubmitFeedbackRequest.Attachments.
 func (g *Guard) UploadFeedbackFile(ctx context.Context, fileName string, contentType string, data io.Reader) (*UploadURLResponse, error) {
+	uploadTarget, err := g.prepareFeedbackUpload(ctx, fileName)
+	if err != nil {
+		return nil, err
+	}
+	if uploadTarget.FileKey == "" {
+		return nil, ErrInvalidServerResponse
+	}
+
 	pr, pw := io.Pipe()
 	writer := multipart.NewWriter(pw)
 
@@ -193,6 +203,10 @@ func (g *Guard) UploadFeedbackFile(ctx context.Context, fileName string, content
 
 		_ = writer.WriteField("license_key", g.cfg.LicenseKey)
 		_ = writer.WriteField("project_slug", g.cfg.ProjectSlug)
+		_ = writer.WriteField("file_key", uploadTarget.FileKey)
+		if contentType != "" {
+			_ = writer.WriteField("content_type", contentType)
+		}
 
 		var part io.Writer
 		part, err = writer.CreateFormFile("file", fileName)
@@ -206,12 +220,13 @@ func (g *Guard) UploadFeedbackFile(ctx context.Context, fileName string, content
 		err = writer.Close()
 	}()
 
-	fullURL := g.cfg.ServerURL + "/api/v1/feedbacks/upload"
+	fullURL := g.feedbackUploadURL(uploadTarget.UploadURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, pr)
 	if err != nil {
 		return nil, fmt.Errorf("create upload request: %w", err)
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("User-Agent", "BanyanHub-SDK/"+Version)
 
 	resp, err := g.httpClient.Do(req)
 	if err != nil {
@@ -227,7 +242,43 @@ func (g *Guard) UploadFeedbackFile(ctx context.Context, fileName string, content
 	if err := decodeJSON(resp.Body, &result); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
+	if result.FileKey == "" {
+		result.FileKey = uploadTarget.FileKey
+	}
+	if result.UploadURL == "" {
+		result.UploadURL = uploadTarget.UploadURL
+	}
 	return &result, nil
+}
+
+func (g *Guard) prepareFeedbackUpload(ctx context.Context, fileName string) (*UploadURLResponse, error) {
+	body := map[string]any{
+		"license_key":  g.cfg.LicenseKey,
+		"project_slug": g.cfg.ProjectSlug,
+		"file_name":    fileName,
+	}
+
+	var resp UploadURLResponse
+	if err := g.postJSON(ctx, "/api/v1/feedbacks/upload-url", body, &resp); err != nil {
+		return nil, fmt.Errorf("prepare feedback upload: %w", err)
+	}
+	if resp.UploadURL == "" {
+		resp.UploadURL = "/api/v1/feedbacks/upload"
+	}
+	return &resp, nil
+}
+
+func (g *Guard) feedbackUploadURL(uploadURL string) string {
+	if uploadURL == "" {
+		uploadURL = "/api/v1/feedbacks/upload"
+	}
+	if strings.HasPrefix(uploadURL, "http://") || strings.HasPrefix(uploadURL, "https://") {
+		return uploadURL
+	}
+	if !strings.HasPrefix(uploadURL, "/") {
+		uploadURL = "/" + uploadURL
+	}
+	return g.cfg.ServerURL + uploadURL
 }
 
 // FetchReleaseNotes retrieves the release notes grouped by version.
@@ -235,14 +286,56 @@ func (g *Guard) FetchReleaseNotes(ctx context.Context) (*ReleaseNotesResponse, e
 	query := url.Values{}
 	query.Set("project_slug", g.cfg.ProjectSlug)
 
-	var resp ReleaseNotesResponse
-	if err := g.getJSON(ctx, "/api/v1/feedbacks/release-notes", query, &resp); err != nil {
+	var wire releaseNotesWireResponse
+	if err := g.getJSON(ctx, "/api/v1/feedbacks/release-notes", query, &wire); err != nil {
 		return nil, fmt.Errorf("fetch release notes: %w", err)
 	}
-	return &resp, nil
+	return wire.toSDKResponse(), nil
 }
 
 // decodeJSON is a small helper to decode JSON from a reader.
 func decodeJSON(r io.Reader, v any) error {
 	return json.NewDecoder(r).Decode(v)
+}
+
+type releaseNotesWireResponse struct {
+	Entries  []ReleaseNoteEntry     `json:"entries"`
+	Releases []releaseNotesWireItem `json:"releases"`
+}
+
+type releaseNotesWireItem struct {
+	ComponentSlug     string             `json:"component_slug"`
+	Version           string             `json:"version"`
+	ReleaseNotes      *string            `json:"release_notes"`
+	ResolvedFeedbacks []ResolvedFeedback `json:"resolved_feedbacks"`
+	Feedbacks         []ResolvedFeedback `json:"feedbacks"`
+	CreatedAt         string             `json:"created_at"`
+}
+
+func (r releaseNotesWireResponse) toSDKResponse() *ReleaseNotesResponse {
+	if len(r.Entries) > 0 || len(r.Releases) == 0 {
+		return &ReleaseNotesResponse{Entries: r.Entries}
+	}
+
+	entries := make([]ReleaseNoteEntry, 0, len(r.Releases))
+	for _, release := range r.Releases {
+		feedbacks := release.ResolvedFeedbacks
+		if len(feedbacks) == 0 {
+			feedbacks = release.Feedbacks
+		}
+
+		notes := ""
+		if release.ReleaseNotes != nil {
+			notes = *release.ReleaseNotes
+		}
+
+		entries = append(entries, ReleaseNoteEntry{
+			ComponentSlug:     release.ComponentSlug,
+			Version:           release.Version,
+			ReleaseNotes:      notes,
+			ResolvedFeedbacks: feedbacks,
+			CreatedAt:         release.CreatedAt,
+		})
+	}
+	return &ReleaseNotesResponse{Entries: entries}
 }
