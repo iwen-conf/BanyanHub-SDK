@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -256,6 +257,256 @@ func TestUpdateFrontend_HashMismatch(t *testing.T) {
 
 	if !failureCalled {
 		t.Error("expected failure callback on hash mismatch")
+	}
+}
+
+func TestUpdateFrontend_RejectsOversizeArchive(t *testing.T) {
+	pubKey, privKey, _ := ed25519.GenerateKey(rand.Reader)
+
+	tarGzBytes := buildTarGz(t, map[string]string{
+		"frontend.txt": "hello frontend",
+	})
+	hashStr := sha256Hex(tarGzBytes)
+	signature := signUpdateHash(t, privKey, hashStr)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/update/download":
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"download_url": "/download/frontend.tar.gz",
+				"sha256":       hashStr,
+				"signature":    signature,
+			})
+		case "/download/frontend.tar.gz":
+			_, _ = w.Write(tarGzBytes)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	var failureErr error
+	targetDir := filepath.Join(t.TempDir(), "live")
+	g := &Guard{
+		cfg: Config{
+			ServerURL:     server.URL,
+			LicenseKey:    "test-key",
+			ProjectSlug:   "test-project",
+			ComponentSlug: "backend",
+			OTA: OTAConfig{
+				MaxArtifactBytes: int64(len(tarGzBytes) - 1),
+				OnUpdateFailure: func(component string, err error) {
+					failureErr = err
+				},
+			},
+		},
+		publicKey:   pubKey,
+		fingerprint: &Fingerprint{machineID: "test-machine"},
+		httpClient:  &http.Client{Timeout: 5 * time.Second},
+		updateMu:    sync.Mutex{},
+		mu:          sync.RWMutex{},
+		managedVersions: map[string]string{
+			"frontend": "1.0.0",
+		},
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	err := g.updateFrontend(ManagedComponent{Slug: "frontend", Dir: targetDir}, updateInfo{
+		Component:       "frontend",
+		Latest:          "2.0.0",
+		UpdateAvailable: true,
+	})
+	if err == nil {
+		t.Fatal("expected oversized archive error")
+	}
+	if !errors.Is(err, ErrUpdateDownload) {
+		t.Fatalf("expected ErrUpdateDownload, got %v", err)
+	}
+	if !errors.Is(failureErr, ErrUpdateDownload) {
+		t.Fatalf("expected failure callback ErrUpdateDownload, got %v", failureErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(targetDir, "frontend.txt")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("oversized archive should not be extracted, statErr=%v", statErr)
+	}
+	if got := g.currentManagedVersion("frontend"); got != "1.0.0" {
+		t.Fatalf("oversized archive should not update version, got %s", got)
+	}
+}
+
+func TestUpdateFrontend_FailsOnConflictingDirectoryEntry(t *testing.T) {
+	pubKey, privKey, _ := ed25519.GenerateKey(rand.Reader)
+
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	content := []byte("not-a-directory")
+	if err := tw.WriteHeader(&tar.Header{Name: "conflict", Mode: 0o644, Size: int64(len(content))}); err != nil {
+		t.Fatalf("write file header: %v", err)
+	}
+	if _, err := tw.Write(content); err != nil {
+		t.Fatalf("write file body: %v", err)
+	}
+	if err := tw.WriteHeader(&tar.Header{Name: "conflict", Typeflag: tar.TypeDir, Mode: 0o755}); err != nil {
+		t.Fatalf("write dir header: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatalf("close gzip: %v", err)
+	}
+
+	tarGzBytes := buf.Bytes()
+	hashStr := sha256Hex(tarGzBytes)
+	signature := signUpdateHash(t, privKey, hashStr)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/update/download":
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"download_url": "/download/frontend.tar.gz",
+				"sha256":       hashStr,
+				"signature":    signature,
+			})
+		case "/download/frontend.tar.gz":
+			_, _ = w.Write(tarGzBytes)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	var failureErr error
+	targetDir := filepath.Join(t.TempDir(), "live")
+	g := &Guard{
+		cfg: Config{
+			ServerURL:     server.URL,
+			LicenseKey:    "test-key",
+			ProjectSlug:   "test-project",
+			ComponentSlug: "backend",
+			OTA: OTAConfig{
+				MaxArtifactBytes: int64(len(tarGzBytes)) + 1024,
+				OnUpdateFailure: func(component string, err error) {
+					failureErr = err
+				},
+			},
+		},
+		publicKey:   pubKey,
+		fingerprint: &Fingerprint{machineID: "test-machine"},
+		httpClient:  &http.Client{Timeout: 5 * time.Second},
+		updateMu:    sync.Mutex{},
+		mu:          sync.RWMutex{},
+		managedVersions: map[string]string{
+			"frontend": "1.0.0",
+		},
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	err := g.updateFrontend(ManagedComponent{Slug: "frontend", Dir: targetDir}, updateInfo{
+		Component:       "frontend",
+		Latest:          "2.0.0",
+		UpdateAvailable: true,
+	})
+	if err == nil {
+		t.Fatal("expected conflicting directory entry error")
+	}
+	if !errors.Is(err, ErrUpdateApply) {
+		t.Fatalf("expected ErrUpdateApply, got %v", err)
+	}
+	if !errors.Is(failureErr, ErrUpdateApply) {
+		t.Fatalf("expected failure callback ErrUpdateApply, got %v", failureErr)
+	}
+	if got := g.currentManagedVersion("frontend"); got != "1.0.0" {
+		t.Fatalf("failed archive should not update version, got %s", got)
+	}
+	if _, statErr := os.Stat(targetDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("failed archive should not be applied, statErr=%v", statErr)
+	}
+}
+
+func TestUpdateFrontend_DuplicateFileEntryTruncatesPreviousContent(t *testing.T) {
+	pubKey, privKey, _ := ed25519.GenerateKey(rand.Reader)
+
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	first := []byte("first-content-is-long")
+	second := []byte("new")
+	if err := tw.WriteHeader(&tar.Header{Name: "index.html", Mode: 0o644, Size: int64(len(first))}); err != nil {
+		t.Fatalf("write first header: %v", err)
+	}
+	if _, err := tw.Write(first); err != nil {
+		t.Fatalf("write first body: %v", err)
+	}
+	if err := tw.WriteHeader(&tar.Header{Name: "index.html", Mode: 0o644, Size: int64(len(second))}); err != nil {
+		t.Fatalf("write second header: %v", err)
+	}
+	if _, err := tw.Write(second); err != nil {
+		t.Fatalf("write second body: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatalf("close gzip: %v", err)
+	}
+
+	tarGzBytes := buf.Bytes()
+	hashStr := sha256Hex(tarGzBytes)
+	signature := signUpdateHash(t, privKey, hashStr)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/update/download":
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"download_url": "/download/frontend.tar.gz",
+				"sha256":       hashStr,
+				"signature":    signature,
+			})
+		case "/download/frontend.tar.gz":
+			_, _ = w.Write(tarGzBytes)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	targetDir := filepath.Join(t.TempDir(), "live")
+	g := &Guard{
+		cfg: Config{
+			ServerURL:     server.URL,
+			LicenseKey:    "test-key",
+			ProjectSlug:   "test-project",
+			ComponentSlug: "backend",
+			OTA: OTAConfig{
+				MaxArtifactBytes: int64(len(tarGzBytes)) + 1024,
+			},
+		},
+		publicKey:   pubKey,
+		fingerprint: &Fingerprint{machineID: "test-machine"},
+		httpClient:  &http.Client{Timeout: 5 * time.Second},
+		updateMu:    sync.Mutex{},
+		mu:          sync.RWMutex{},
+		managedVersions: map[string]string{
+			"frontend": "1.0.0",
+		},
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	if err := g.updateFrontend(ManagedComponent{Slug: "frontend", Dir: targetDir}, updateInfo{
+		Component:       "frontend",
+		Latest:          "2.0.0",
+		UpdateAvailable: true,
+	}); err != nil {
+		t.Fatalf("updateFrontend failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(targetDir, "index.html"))
+	if err != nil {
+		t.Fatalf("read extracted duplicate file: %v", err)
+	}
+	if string(data) != string(second) {
+		t.Fatalf("duplicate file should be truncated to latest entry, got %q", string(data))
 	}
 }
 

@@ -61,6 +61,12 @@ func New(cfg Config) (*Guard, error) {
 	if cfg.ComponentSlug == "" {
 		return nil, fmt.Errorf("component_slug is required")
 	}
+	normalizedServerURL, err := normalizeServerURL(cfg.ServerURL)
+	if err != nil {
+		return nil, err
+	}
+	cfg.ServerURL = normalizedServerURL
+
 	pubKeys, err := decodePublicKeys(cfg.PublicKeyPEM, cfg.LegacyPublicKeysPEM)
 	if err != nil {
 		return nil, err
@@ -348,7 +354,7 @@ func (g *Guard) postJSON(ctx context.Context, path string, body any, result any)
 		return fmt.Errorf("marshal request: %w", err)
 	}
 
-	url := g.cfg.ServerURL + path
+	url := serverURLForPath(g.cfg.ServerURL, path)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
@@ -363,10 +369,10 @@ func (g *Guard) postJSON(ctx context.Context, path string, body any, result any)
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("%w: status %d", ErrInvalidServerResponse, resp.StatusCode)
+		return decodeAPIErrorResponse(resp)
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+	if err := decodeAPIJSONResponse(resp, result); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
 
@@ -375,7 +381,7 @@ func (g *Guard) postJSON(ctx context.Context, path string, body any, result any)
 
 // getJSON sends a JSON GET request to the server and decodes the response.
 func (g *Guard) getJSON(ctx context.Context, path string, query url.Values, result any) error {
-	fullURL := g.cfg.ServerURL + path
+	fullURL := serverURLForPath(g.cfg.ServerURL, path)
 	if len(query) > 0 {
 		fullURL += "?" + query.Encode()
 	}
@@ -393,20 +399,22 @@ func (g *Guard) getJSON(ctx context.Context, path string, query url.Values, resu
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("%w: status %d", ErrInvalidServerResponse, resp.StatusCode)
+		return decodeAPIErrorResponse(resp)
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+	if err := decodeAPIJSONResponse(resp, result); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
 
 	return nil
 }
 
-func randomNonce() string {
+func randomNonce() (string, error) {
 	b := make([]byte, 16)
-	rand.Read(b)
-	return hex.EncodeToString(b)
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
+		return "", fmt.Errorf("generate nonce: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 func nowUnix() int64 {

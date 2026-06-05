@@ -1,0 +1,95 @@
+{
+  "keys": {
+    "public_spki": "MCowBQYDK2VwAyEAPxTuYeImfFSRzUvJi0d5vIpWWq1akyAG7CFSov//F44=",
+    "private_pkcs8": "MC4CAQAwBQYDK2VwBCIEID6UZ0LDGP/cmw+4KJYVMmE+3DtJ1DCeMH6MjlZwrGm3"
+  },
+  "lease": {
+    "payload": {
+      "expires_at": "2026-06-09T12:00:00Z",
+      "features": [
+        "feat1",
+        "feat2"
+      ],
+      "grace_until": "2026-06-05T12:00:00Z",
+      "issued_at": "2026-06-02T12:00:00Z",
+      "lease_id": "lease_123",
+      "license_key": "TEST-KEY-123",
+      "machine_id": "machine_456",
+      "max_machines": 5,
+      "project_slug": "nexus",
+      "server_time": "2026-06-02T12:00:00Z",
+      "tier": "commercial"
+    },
+    "canonical": "{\"expires_at\":\"2026-06-09T12:00:00Z\",\"features\":[\"feat1\",\"feat2\"],\"grace_until\":\"2026-06-05T12:00:00Z\",\"issued_at\":\"2026-06-02T12:00:00Z\",\"lease_id\":\"lease_123\",\"license_key\":\"TEST-KEY-123\",\"machine_id\":\"machine_456\",\"max_machines\":5,\"project_slug\":\"nexus\",\"server_time\":\"2026-06-02T12:00:00Z\",\"tier\":\"commercial\"}",
+    "signature": "ESLCjUo/0ki69n/QCFrc6i5Idi+siaRV6XYRXeYqVRVaxjfAb/xXyXnwuZbswyhv0oFnEkMjlby84WPEM5JODg=="
+  },
+  "heartbeat": {
+    "empty_updates": {
+      "updates": [],
+      "updates_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "payload": {
+        "lease": {
+          "expires_at": "2026-06-09T12:00:00Z",
+          "features": [
+            "feat1",
+            "feat2"
+          ],
+          "grace_until": "2026-06-05T12:00:00Z",
+          "issued_at": "2026-06-02T12:00:00Z",
+          "lease_id": "lease_123",
+          "license_key": "TEST-KEY-123",
+          "machine_id": "machine_456",
+          "max_machines": 5,
+          "project_slug": "nexus",
+          "server_time": "2026-06-02T12:00:00Z",
+          "tier": "commercial"
+        },
+        "lease_signature": "ESLCjUo/0ki69n/QCFrc6i5Idi+siaRV6XYRXeYqVRVaxjfAb/xXyXnwuZbswyhv0oFnEkMjlby84WPEM5JODg==",
+        "nonce": "NONCE123",
+        "server_time": "2026-06-02T12:00:00Z",
+        "status": "ok",
+        "updates_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "canonical": "{\"lease\":{\"expires_at\":\"2026-06-09T12:00:00Z\",\"features\":[\"feat1\",\"feat2\"],\"grace_until\":\"2026-06-05T12:00:00Z\",\"issued_at\":\"2026-06-02T12:00:00Z\",\"lease_id\":\"lease_123\",\"license_key\":\"TEST-KEY-123\",\"machine_id\":\"machine_456\",\"max_machines\":5,\"project_slug\":\"nexus\",\"server_time\":\"2026-06-02T12:00:00Z\",\"tier\":\"commercial\"},\"lease_signature\":\"ESLCjUo/0ki69n/QCFrc6i5Idi+siaRV6XYRXeYqVRVaxjfAb/xXyXnwuZbswyhv0oFnEkMjlby84WPEM5JODg==\",\"nonce\":\"NONCE123\",\"server_time\":\"2026-06-02T12:00:00Z\",\"status\":\"ok\",\"updates_digest\":\"4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945\"}",
+      "signature": "vLuS8ypHH7wUHQi92wVbuKq3ly2mwOAhTbcmoco87zX7+jlwU0xSjOxdzMYZEr7v5m1HMbYUXtGqj50GIsVeCQ=="
+    },
+    "non_empty_updates": {
+      "updates": [
+        {
+          "component": "backend",
+          "current": "1.0.0",
+          "latest": "1.1.0",
+          "update_available": true,
+          "mandatory": false,
+          "release_notes": "Bug fixes and performance improvements"
+        }
+      ],
+      "updates_digest": "e66785e2ffa9812f64cff91a66cb980536c32c67b5d9b216a0c5ede5d84904cd",
+      "payload": {
+        "lease": {
+          "expires_at": "2026-06-09T12:00:00Z",
+          "features": [
+            "feat1",
+            "feat2"
+          ],
+          "grace_until": "2026-06-05T12:00:00Z",
+          "issued_at": "2026-06-02T12:00:00Z",
+          "lease_id": "lease_123",
+          "license_key": "TEST-KEY-123",
+          "machine_id": "machine_456",
+          "max_machines": 5,
+          "project_slug": "nexus",
+          "server_time": "2026-06-02T12:00:00Z",
+          "tier": "commercial"
+        },
+        "lease_signature": "ESLCjUo/0ki69n/QCFrc6i5Idi+siaRV6XYRXeYqVRVaxjfAb/xXyXnwuZbswyhv0oFnEkMjlby84WPEM5JODg==",
+        "nonce": "NONCE456",
+        "server_time": "2026-06-02T12:30:00Z",
+        "status": "warn",
+        "updates_digest": "e66785e2ffa9812f64cff91a66cb980536c32c67b5d9b216a0c5ede5d84904cd"
+      },
+      "canonical": "{\"lease\":{\"expires_at\":\"2026-06-09T12:00:00Z\",\"features\":[\"feat1\",\"feat2\"],\"grace_until\":\"2026-06-05T12:00:00Z\",\"issued_at\":\"2026-06-02T12:00:00Z\",\"lease_id\":\"lease_123\",\"license_key\":\"TEST-KEY-123\",\"machine_id\":\"machine_456\",\"max_machines\":5,\"project_slug\":\"nexus\",\"server_time\":\"2026-06-02T12:00:00Z\",\"tier\":\"commercial\"},\"lease_signature\":\"ESLCjUo/0ki69n/QCFrc6i5Idi+siaRV6XYRXeYqVRVaxjfAb/xXyXnwuZbswyhv0oFnEkMjlby84WPEM5JODg==\",\"nonce\":\"NONCE456\",\"server_time\":\"2026-06-02T12:30:00Z\",\"status\":\"warn\",\"updates_digest\":\"e66785e2ffa9812f64cff91a66cb980536c32c67b5d9b216a0c5ede5d84904cd\"}",
+      "signature": "QkNkepxno14MeZUGkqQZpaIkrQor/b6vUpwf++lwBz5M76jAWrHwNTZLBlDWXCJS2ckt7kSKAlMfY4NiFHraBQ=="
+    }
+  }
+}

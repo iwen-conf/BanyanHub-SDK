@@ -69,8 +69,6 @@ func TestResetBinaryHashCache(t *testing.T) {
 	}
 }
 
-
-
 func TestGetBinaryHash_MultipleCalls(t *testing.T) {
 	ResetBinaryHashCache()
 

@@ -65,25 +65,27 @@ func TestMarketplaceCatalogDetailReviews(t *testing.T) {
 				"total":     1,
 				"items": []map[string]any{
 					{
-						"id":                 "item-1",
 						"slug":               "demo",
 						"item_type":          "template",
 						"name":               "Demo Template",
 						"current_version":    "1.0.0",
 						"package_size_bytes": 1234,
-						"screenshots":        []string{},
-						"target":             "backend",
-						"scope":              "extension",
-						"manifest":           map[string]any{"entry": "plugin.js"},
-						"os":                 []string{"linux"},
-						"arch":               []string{"amd64"},
-						"sdk_version_req":    ">=1.0.0",
-						"permissions":        []string{"net.http"},
-						"dependencies":       map[string]string{"runtime": ">=1.0.0"},
-						"config_schema":      map[string]any{"type": "object"},
-						"status":             "published",
-						"created_at":         "2026-01-01T00:00:00Z",
-						"updated_at":         "2026-01-02T00:00:00Z",
+						"thumbnail_url":      "/api/v1/marketplace/assets/marketplace%2Fassets%2Fitem-1%2Fthumbnail%2Fthumb.png",
+						"screenshot_urls": []string{
+							"/api/v1/marketplace/assets/marketplace%2Fassets%2Fitem-1%2Fscreenshots%2Fscreen.png",
+						},
+						"target":          "backend",
+						"scope":           "extension",
+						"manifest":        map[string]any{"entry": "plugin.js"},
+						"os":              []string{"linux"},
+						"arch":            []string{"amd64"},
+						"sdk_version_req": ">=1.0.0",
+						"permissions":     []string{"net.http"},
+						"dependencies":    map[string]string{"runtime": ">=1.0.0"},
+						"config_schema":   map[string]any{"type": "object"},
+						"status":          "published",
+						"created_at":      "2026-01-01T00:00:00Z",
+						"updated_at":      "2026-01-02T00:00:00Z",
 						"stats": map[string]any{
 							"rating_count":  2,
 							"rating_avg":    4.5,
@@ -98,16 +100,18 @@ func TestMarketplaceCatalogDetailReviews(t *testing.T) {
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"item": map[string]any{
-					"id":                 "item-1",
 					"slug":               "demo",
 					"item_type":          "template",
 					"name":               "Demo Template",
 					"current_version":    "1.0.0",
 					"package_size_bytes": 1234,
-					"screenshots":        []string{},
-					"status":             "published",
-					"created_at":         "2026-01-01T00:00:00Z",
-					"updated_at":         "2026-01-02T00:00:00Z",
+					"thumbnail_url":      "/api/v1/marketplace/assets/marketplace%2Fassets%2Fitem-1%2Fthumbnail%2Fthumb.png",
+					"screenshot_urls": []string{
+						"/api/v1/marketplace/assets/marketplace%2Fassets%2Fitem-1%2Fscreenshots%2Fscreen.png",
+					},
+					"status":     "published",
+					"created_at": "2026-01-01T00:00:00Z",
+					"updated_at": "2026-01-02T00:00:00Z",
 					"stats": map[string]any{
 						"rating_count":  2,
 						"rating_avg":    4.5,
@@ -175,6 +179,15 @@ func TestMarketplaceCatalogDetailReviews(t *testing.T) {
 	if catalog.Items[0].ConfigSchema["type"] != "object" {
 		t.Fatalf("unexpected config schema: %#v", catalog.Items[0].ConfigSchema)
 	}
+	if catalog.Items[0].ID != "" || catalog.Items[0].ComponentID != nil || catalog.Items[0].TemplateID != nil {
+		t.Fatalf("catalog item should not expose internal IDs: %#v", catalog.Items[0])
+	}
+	if catalog.Items[0].ThumbnailURL == nil || *catalog.Items[0].ThumbnailURL == "" {
+		t.Fatalf("expected public thumbnail URL, got %#v", catalog.Items[0].ThumbnailURL)
+	}
+	if len(catalog.Items[0].ScreenshotURLs) != 1 {
+		t.Fatalf("expected public screenshot URL, got %#v", catalog.Items[0].ScreenshotURLs)
+	}
 
 	detail, err := guard.GetMarketplaceItem(context.Background(), "demo")
 	if err != nil {
@@ -182,6 +195,12 @@ func TestMarketplaceCatalogDetailReviews(t *testing.T) {
 	}
 	if detail.Item.Name != "Demo Template" {
 		t.Fatalf("unexpected item name: %s", detail.Item.Name)
+	}
+	if detail.Item.ID != "" || detail.Item.ComponentID != nil || detail.Item.TemplateID != nil {
+		t.Fatalf("detail item should not expose internal IDs: %#v", detail.Item)
+	}
+	if detail.Item.ThumbnailURL == nil || *detail.Item.ThumbnailURL == "" {
+		t.Fatalf("expected public detail thumbnail URL, got %#v", detail.Item.ThumbnailURL)
 	}
 	if detail.MyInstall == nil || detail.MyInstall.Status != "installed" {
 		t.Fatalf("unexpected my_install: %#v", detail.MyInstall)

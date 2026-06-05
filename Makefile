@@ -10,10 +10,13 @@ LDFLAGS := -X 'github.com/iwen-conf/BanyanHub-SDK.Version=$(VERSION)' \
            -X 'github.com/iwen-conf/BanyanHub-SDK.BuildTime=$(BUILD_TIME)' \
            -X 'github.com/iwen-conf/BanyanHub-SDK.GoVersion=$(GO_VERSION)'
 
-.PHONY: test vet lint coverage clean version
+.PHONY: test vet lint coverage clean version contract-check
 
 test:
 	go test ./... -race -covermode=atomic -coverprofile=coverage.out
+
+contract-check:
+	./scripts/check-contract-parity.sh
 
 vet:
 	go vet ./...
@@ -35,4 +38,4 @@ version:
 clean:
 	rm -f coverage.out
 
-all: vet lint test
+all: contract-check vet lint test

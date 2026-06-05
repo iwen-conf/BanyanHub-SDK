@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -242,6 +243,42 @@ func TestDownloadArtifactWithProgress_NetworkError(t *testing.T) {
 	}
 }
 
+func TestDownloadArtifactWithProgress_AbsoluteURL(t *testing.T) {
+	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
+	artifact := []byte("absolute artifact")
+	expectedHash := sha256.Sum256(artifact)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/download/absolute.bin" {
+			t.Fatalf("unexpected download path: %q", r.URL.Path)
+		}
+		_, _ = w.Write(artifact)
+	}))
+	defer server.Close()
+
+	g := &Guard{
+		cfg: Config{
+			ServerURL: "http://unused.invalid",
+			OTA: OTAConfig{
+				DownloadTimeout:  10 * time.Second,
+				MaxArtifactBytes: 1024 * 1024,
+			},
+		},
+		publicKey:  pubKey,
+		httpClient: &http.Client{Timeout: 30 * time.Second},
+	}
+
+	tmpPath, actualHash, err := g.downloadArtifactWithProgress(server.URL+"/download/absolute.bin", g.cfg.OTA.MaxArtifactBytes)
+	if err != nil {
+		t.Fatalf("downloadArtifactWithProgress failed: %v", err)
+	}
+	defer os.Remove(tmpPath)
+
+	if actualHash != hex.EncodeToString(expectedHash[:]) {
+		t.Fatalf("actualHash = %q, want %q", actualHash, hex.EncodeToString(expectedHash[:]))
+	}
+}
+
 func TestDownloadArtifactWithProgress_ExceedsMaxBytes(t *testing.T) {
 	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
 
@@ -268,18 +305,17 @@ func TestDownloadArtifactWithProgress_ExceedsMaxBytes(t *testing.T) {
 	}
 
 	tmpPath, _, err := g.downloadArtifactWithProgress("/download/test.bin", g.cfg.OTA.MaxArtifactBytes)
-	if err != nil {
-		t.Fatalf("downloadArtifactWithProgress failed: %v", err)
+	if err == nil {
+		defer os.Remove(tmpPath)
+		t.Fatal("expected oversized artifact error")
 	}
-	defer os.Remove(tmpPath)
-
-	info, err := os.Stat(tmpPath)
-	if err != nil {
-		t.Fatalf("stat failed: %v", err)
+	if !errors.Is(err, ErrUpdateDownload) {
+		t.Fatalf("expected ErrUpdateDownload, got %v", err)
 	}
-
-	if info.Size() > 100 {
-		t.Errorf("expected file size <= 100, got %d", info.Size())
+	if tmpPath != "" {
+		if _, statErr := os.Stat(tmpPath); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("oversized temp file should be removed, statErr=%v", statErr)
+		}
 	}
 }
 

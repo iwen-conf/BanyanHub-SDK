@@ -11,7 +11,7 @@ import (
 
 var (
 	// Cached binary hash to avoid recalculating
-	binaryHashOnce sync.Once
+	binaryHashOnce  sync.Once
 	binaryHashValue string
 	binaryHashError error
 )

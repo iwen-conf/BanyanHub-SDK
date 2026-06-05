@@ -222,7 +222,8 @@ func (g *Guard) requestDownloadMeta(component, version, os, arch string) (url, s
 }
 
 func (g *Guard) downloadArtifactWithProgress(downloadURL string, maxBytes int64) (tmpPath, sha256Hash string, err error) {
-	fullURL := g.cfg.ServerURL + downloadURL
+	fullURL := serverURLForPath(g.cfg.ServerURL, downloadURL)
+	maxBytes = normalizeArtifactMaxBytes(maxBytes)
 
 	ctx, cancel := context.WithTimeout(context.Background(), g.otaDownloadTimeout())
 	defer cancel()
@@ -242,6 +243,9 @@ func (g *Guard) downloadArtifactWithProgress(downloadURL string, maxBytes int64)
 	if httpResp.StatusCode != http.StatusOK {
 		return "", "", fmt.Errorf("download failed with status %d", httpResp.StatusCode)
 	}
+	if httpResp.ContentLength > maxBytes {
+		return "", "", artifactTooLargeError(maxBytes)
+	}
 
 	tmpFile, err := os.CreateTemp("", "deploy-guard-update-*")
 	if err != nil {
@@ -250,7 +254,7 @@ func (g *Guard) downloadArtifactWithProgress(downloadURL string, maxBytes int64)
 	defer tmpFile.Close()
 
 	hasher := sha256.New()
-	limitedReader := io.LimitReader(httpResp.Body, maxBytes)
+	limitedReader := newArtifactLimitReader(httpResp.Body, maxBytes)
 
 	if _, err := io.Copy(io.MultiWriter(tmpFile, hasher), limitedReader); err != nil {
 		os.Remove(tmpFile.Name())
@@ -318,31 +322,28 @@ func (g *Guard) updateFrontend(mc ManagedComponent, u updateInfo) error {
 		g.cfg.OTA.OnUpdateProgress(mc.Slug, "downloading", 0.3)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), g.otaDownloadTimeout())
-	defer cancel()
-
-	// Download tar.gz
-	fullURL := g.cfg.ServerURL + downloadURL
-	dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
-	if err != nil {
-		wrapped := fmt.Errorf("%w: %v", ErrUpdateDownload, err)
-		g.logger.Error("failed to create download request", "component", mc.Slug, "error", err)
-		g.notifyUpdateFailure(mc.Slug, oldVersion, u.Latest, wrapped)
-		return wrapped
-	}
-	dlReq.Header.Set("User-Agent", "BanyanHub-SDK/"+Version)
-	httpResp, err := g.httpClient.Do(dlReq)
+	archivePath, actualHash, err := g.downloadArtifactWithProgress(downloadURL, g.otaMaxArtifactBytes())
 	if err != nil {
 		wrapped := fmt.Errorf("%w: %v", ErrUpdateDownload, err)
 		g.logger.Error("failed to download", "component", mc.Slug, "error", err)
 		g.notifyUpdateFailure(mc.Slug, oldVersion, u.Latest, wrapped)
 		return wrapped
 	}
-	defer httpResp.Body.Close()
+	defer os.Remove(archivePath)
 
-	if httpResp.StatusCode != http.StatusOK {
-		wrapped := fmt.Errorf("%w: status %d", ErrUpdateDownload, httpResp.StatusCode)
-		g.logger.Error("download failed with status", "component", mc.Slug, "status", httpResp.StatusCode)
+	if g.cfg.OTA.OnUpdateProgress != nil {
+		g.cfg.OTA.OnUpdateProgress(mc.Slug, "verifying", 0.45)
+	}
+
+	if actualHash != expectedSHA256 {
+		wrapped := fmt.Errorf("%w: hash mismatch", ErrUpdateVerify)
+		g.logger.Error("hash mismatch", "component", mc.Slug, "expected", expectedSHA256, "actual", actualHash)
+		g.notifyUpdateFailure(mc.Slug, oldVersion, u.Latest, wrapped)
+		return wrapped
+	}
+	if err := g.verifySignature(expectedSHA256, signature); err != nil {
+		wrapped := fmt.Errorf("%w: %v", ErrUpdateVerify, err)
+		g.logger.Error("signature verification failed", "component", mc.Slug, "error", err)
 		g.notifyUpdateFailure(mc.Slug, oldVersion, u.Latest, wrapped)
 		return wrapped
 	}
@@ -360,12 +361,16 @@ func (g *Guard) updateFrontend(mc ManagedComponent, u updateInfo) error {
 		g.cfg.OTA.OnUpdateProgress(mc.Slug, "extracting", 0.5)
 	}
 
-	// Stream through SHA256 hasher → gzip → tar extraction with size limit
-	hasher := sha256.New()
-	limitedReader := io.LimitReader(httpResp.Body, g.otaMaxArtifactBytes())
-	tee := io.TeeReader(limitedReader, hasher)
+	archiveFile, err := os.Open(archivePath)
+	if err != nil {
+		wrapped := fmt.Errorf("%w: %v", ErrUpdateApply, err)
+		g.logger.Error("failed to open verified archive", "component", mc.Slug, "error", err)
+		g.notifyUpdateFailure(mc.Slug, oldVersion, u.Latest, wrapped)
+		return wrapped
+	}
+	defer archiveFile.Close()
 
-	gz, err := gzip.NewReader(tee)
+	gz, err := gzip.NewReader(archiveFile)
 	if err != nil {
 		wrapped := fmt.Errorf("%w: %v", ErrUpdateVerify, err)
 		g.logger.Error("failed to create gzip reader", "component", mc.Slug, "error", err)
@@ -397,10 +402,20 @@ func (g *Guard) updateFrontend(mc ManagedComponent, u updateInfo) error {
 
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			os.MkdirAll(target, os.FileMode(hdr.Mode))
+			if err := os.MkdirAll(target, os.FileMode(hdr.Mode)); err != nil {
+				wrapped := fmt.Errorf("%w: %v", ErrUpdateApply, err)
+				g.logger.Error("failed to create directory", "component", mc.Slug, "dir", target, "error", err)
+				g.notifyUpdateFailure(mc.Slug, oldVersion, u.Latest, wrapped)
+				return wrapped
+			}
 		case tar.TypeReg:
-			os.MkdirAll(filepath.Dir(target), 0o755)
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY, os.FileMode(hdr.Mode))
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				wrapped := fmt.Errorf("%w: %v", ErrUpdateApply, err)
+				g.logger.Error("failed to create parent directory", "component", mc.Slug, "file", target, "error", err)
+				g.notifyUpdateFailure(mc.Slug, oldVersion, u.Latest, wrapped)
+				return wrapped
+			}
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(hdr.Mode))
 			if err != nil {
 				wrapped := fmt.Errorf("%w: %v", ErrUpdateApply, err)
 				g.logger.Error("failed to create file", "component", mc.Slug, "file", target, "error", err)
@@ -408,33 +423,21 @@ func (g *Guard) updateFrontend(mc ManagedComponent, u updateInfo) error {
 				return wrapped
 			}
 			if _, err := io.Copy(f, tr); err != nil {
-				f.Close()
+				if closeErr := f.Close(); closeErr != nil {
+					g.logger.Warn("failed to close partial file after write error", "component", mc.Slug, "file", target, "error", closeErr)
+				}
 				wrapped := fmt.Errorf("%w: %v", ErrUpdateApply, err)
 				g.logger.Error("failed to write file", "component", mc.Slug, "file", target, "error", err)
 				g.notifyUpdateFailure(mc.Slug, oldVersion, u.Latest, wrapped)
 				return wrapped
 			}
-			f.Close()
+			if err := f.Close(); err != nil {
+				wrapped := fmt.Errorf("%w: %v", ErrUpdateApply, err)
+				g.logger.Error("failed to close file", "component", mc.Slug, "file", target, "error", err)
+				g.notifyUpdateFailure(mc.Slug, oldVersion, u.Latest, wrapped)
+				return wrapped
+			}
 		}
-	}
-
-	if g.cfg.OTA.OnUpdateProgress != nil {
-		g.cfg.OTA.OnUpdateProgress(mc.Slug, "verifying", 0.8)
-	}
-
-	// Verify SHA256
-	actualHash := hex.EncodeToString(hasher.Sum(nil))
-	if actualHash != expectedSHA256 {
-		wrapped := fmt.Errorf("%w: hash mismatch", ErrUpdateVerify)
-		g.logger.Error("hash mismatch", "component", mc.Slug, "expected", expectedSHA256, "actual", actualHash)
-		g.notifyUpdateFailure(mc.Slug, oldVersion, u.Latest, wrapped)
-		return wrapped
-	}
-	if err := g.verifySignature(expectedSHA256, signature); err != nil {
-		wrapped := fmt.Errorf("%w: %v", ErrUpdateVerify, err)
-		g.logger.Error("signature verification failed", "component", mc.Slug, "error", err)
-		g.notifyUpdateFailure(mc.Slug, oldVersion, u.Latest, wrapped)
-		return wrapped
 	}
 
 	if g.cfg.OTA.OnUpdateProgress != nil {
@@ -526,4 +529,47 @@ func (g *Guard) otaMaxArtifactBytes() int64 {
 		return g.cfg.OTA.MaxArtifactBytes
 	}
 	return 500 * 1024 * 1024
+}
+
+func normalizeArtifactMaxBytes(maxBytes int64) int64 {
+	if maxBytes > 0 {
+		return maxBytes
+	}
+	return 500 * 1024 * 1024
+}
+
+func artifactTooLargeError(maxBytes int64) error {
+	return fmt.Errorf("%w: artifact exceeds max size %d bytes", ErrUpdateDownload, maxBytes)
+}
+
+type artifactLimitReader struct {
+	reader    io.Reader
+	remaining int64
+	maxBytes  int64
+}
+
+func newArtifactLimitReader(reader io.Reader, maxBytes int64) *artifactLimitReader {
+	maxBytes = normalizeArtifactMaxBytes(maxBytes)
+	return &artifactLimitReader{
+		reader:    reader,
+		remaining: maxBytes,
+		maxBytes:  maxBytes,
+	}
+}
+
+func (r *artifactLimitReader) Read(p []byte) (int, error) {
+	if r.remaining <= 0 {
+		var probe [1]byte
+		n, err := r.reader.Read(probe[:])
+		if n > 0 {
+			return 0, artifactTooLargeError(r.maxBytes)
+		}
+		return 0, err
+	}
+	if int64(len(p)) > r.remaining {
+		p = p[:r.remaining]
+	}
+	n, err := r.reader.Read(p)
+	r.remaining -= int64(n)
+	return n, err
 }

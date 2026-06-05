@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
+	"errors"
 	"io"
 	"log/slog"
 	"testing"
@@ -37,6 +38,34 @@ func TestNew_Success(t *testing.T) {
 	}
 }
 
+func TestRandomNonceReturnsEntropyErrors(t *testing.T) {
+	originalReader := rand.Reader
+	entropyErr := errors.New("entropy unavailable")
+	rand.Reader = failingEntropyReader{err: entropyErr}
+	t.Cleanup(func() {
+		rand.Reader = originalReader
+	})
+
+	nonce, err := randomNonce()
+	if err == nil {
+		t.Fatal("expected entropy error")
+	}
+	if nonce != "" {
+		t.Fatalf("expected empty nonce on error, got %q", nonce)
+	}
+	if !errors.Is(err, entropyErr) {
+		t.Fatalf("expected wrapped entropy error, got %v", err)
+	}
+}
+
+type failingEntropyReader struct {
+	err error
+}
+
+func (r failingEntropyReader) Read(_ []byte) (int, error) {
+	return 0, r.err
+}
+
 func TestNew_MissingParameters(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
@@ -51,22 +80,22 @@ func TestNew_MissingParameters(t *testing.T) {
 		// Removed "missing server URL" test case
 		{
 			"missing license key",
-			Config{ServerURL: "url", PublicKeyPEM: pubKeyPEM, ProjectSlug: "proj", ComponentSlug: "comp"},
+			Config{ServerURL: "http://localhost", PublicKeyPEM: pubKeyPEM, ProjectSlug: "proj", ComponentSlug: "comp"},
 			"license_key is required",
 		},
 		{
 			"missing public key",
-			Config{ServerURL: "url", LicenseKey: "key", ProjectSlug: "proj", ComponentSlug: "comp"},
+			Config{ServerURL: "http://localhost", LicenseKey: "key", ProjectSlug: "proj", ComponentSlug: "comp"},
 			"public_key_pem is required",
 		},
 		{
 			"missing project slug",
-			Config{ServerURL: "url", LicenseKey: "key", PublicKeyPEM: pubKeyPEM, ComponentSlug: "comp"},
+			Config{ServerURL: "http://localhost", LicenseKey: "key", PublicKeyPEM: pubKeyPEM, ComponentSlug: "comp"},
 			"project_slug is required",
 		},
 		{
 			"missing component slug",
-			Config{ServerURL: "url", LicenseKey: "key", PublicKeyPEM: pubKeyPEM, ProjectSlug: "proj"},
+			Config{ServerURL: "http://localhost", LicenseKey: "key", PublicKeyPEM: pubKeyPEM, ProjectSlug: "proj"},
 			"component_slug is required",
 		},
 	}
@@ -81,6 +110,23 @@ func TestNew_MissingParameters(t *testing.T) {
 				t.Errorf("expected error %q, got %q", tt.expectedErr, err.Error())
 			}
 		})
+	}
+}
+
+func TestNew_InvalidServerURL(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
+
+	_, err := New(Config{
+		ServerURL:        "url",
+		LicenseKey:       "test-key",
+		PublicKeyPEM:     pemEncodePublicKey(pubKey),
+		ProjectSlug:      "test-project",
+		ComponentSlug:    "backend",
+		AllowSystemTrust: true,
+	})
+	if !errors.Is(err, ErrInvalidServerURL) {
+		t.Fatalf("expected ErrInvalidServerURL, got %v", err)
 	}
 }
 

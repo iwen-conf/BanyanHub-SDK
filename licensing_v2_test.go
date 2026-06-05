@@ -62,6 +62,25 @@ func TestHeartbeat_UnsignedResponseForcesFailure(t *testing.T) {
 	}
 }
 
+func TestHeartbeatJitterBounds(t *testing.T) {
+	interval := time.Second
+	min := 900 * time.Millisecond
+	max := 1100 * time.Millisecond
+
+	for i := 0; i < 100; i++ {
+		got := heartbeatJitter(interval)
+		if got < min || got > max {
+			t.Fatalf("heartbeatJitter(%v) = %v, want between %v and %v", interval, got, min, max)
+		}
+	}
+	if got := heartbeatJitter(0); got != 0 {
+		t.Fatalf("heartbeatJitter(0) = %v, want 0", got)
+	}
+	if got := heartbeatJitter(time.Nanosecond); got != time.Nanosecond {
+		t.Fatalf("heartbeatJitter(1ns) = %v, want 1ns", got)
+	}
+}
+
 func TestPersistentBannedStateSurvivesRestart(t *testing.T) {
 	tempHome := t.TempDir()
 	t.Setenv("HOME", tempHome)
@@ -301,8 +320,50 @@ func TestStateFileWritten(t *testing.T) {
 	if err := guard.acceptLease(mustParseLease(t, leaseJSON), sig, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(guard.store.cacheDir(), "state.bin")); err != nil {
+	statePath := filepath.Join(guard.store.cacheDir(), "state.bin")
+	info, err := os.Stat(statePath)
+	if err != nil {
 		t.Fatalf("state.bin missing: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("state.bin mode = %v, want 0600", info.Mode().Perm())
+	}
+	if loaded, err := guard.store.Load(); err != nil || loaded == nil || loaded.Lease == nil {
+		t.Fatalf("saved state should reload, state=%#v err=%v", loaded, err)
+	}
+	matches, err := filepath.Glob(filepath.Join(guard.store.cacheDir(), ".state.bin.*.tmp"))
+	if err != nil {
+		t.Fatalf("glob temp state files: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("state save should not leave temp files: %v", matches)
+	}
+}
+
+func TestStateSaveCleansTempFileOnRenameFailure(t *testing.T) {
+	guard, _ := newTestGuard(t, nil)
+	dir := guard.store.cacheDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir cache dir: %v", err)
+	}
+	statePath := filepath.Join(dir, "state.bin")
+	if err := os.Mkdir(statePath, 0o700); err != nil {
+		t.Fatalf("mkdir state.bin blocker: %v", err)
+	}
+
+	err := guard.store.Save(&persistedState{BanFlag: true})
+	if err == nil {
+		t.Fatal("expected state save to fail when target is a directory")
+	}
+	if info, statErr := os.Stat(statePath); statErr != nil || !info.IsDir() {
+		t.Fatalf("state.bin blocker should remain a directory, info=%#v err=%v", info, statErr)
+	}
+	matches, globErr := filepath.Glob(filepath.Join(dir, ".state.bin.*.tmp"))
+	if globErr != nil {
+		t.Fatalf("glob temp state files: %v", globErr)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("failed state save should clean temp files: %v", matches)
 	}
 }
 

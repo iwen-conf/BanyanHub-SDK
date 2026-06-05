@@ -11,11 +11,11 @@ import (
 )
 
 type heartbeatVectorCase struct {
-	Updates       []updateInfo            `json:"updates"`
-	UpdatesDigest string                  `json:"updates_digest"`
-	Payload       map[string]interface{}  `json:"payload"`
-	Canonical     string                  `json:"canonical"`
-	Signature     string                  `json:"signature"`
+	Updates       []updateInfo           `json:"updates"`
+	UpdatesDigest string                 `json:"updates_digest"`
+	Payload       map[string]interface{} `json:"payload"`
+	Canonical     string                 `json:"canonical"`
+	Signature     string                 `json:"signature"`
 }
 
 type vector struct {
@@ -35,7 +35,7 @@ type vector struct {
 }
 
 func TestV3ContractParity(t *testing.T) {
-	data, err := os.ReadFile("../../contract/v3_vectors.json")
+	data, err := os.ReadFile("contract/v3_vectors.json")
 	if err != nil {
 		t.Fatalf("failed to read vectors: %v", err)
 	}

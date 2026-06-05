@@ -1,0 +1,1986 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "BanyanHub SDK-facing API",
+    "version": "1.0.0",
+    "description": "Machine-readable contract for endpoints called directly by the Go SDK."
+  },
+  "servers": [
+    {
+      "url": "https://guard.iluwen.cn"
+    }
+  ],
+  "x-contract-scope": "sdk-facing",
+  "x-sdk-error-map": {
+    "artifact_not_found": "ErrUpdateDownload",
+    "artifact_missing": "ErrUpdateDownload",
+    "artifact_missing_from_storage": "ErrUpdateDownload",
+    "binary_not_recognized": "ErrBinaryNotRecognized",
+    "cdk_already_used": "ErrCDKAlreadyUsed",
+    "cdk_not_found": "ErrCDKNotFound",
+    "cdk_revoked": "ErrCDKRevoked",
+    "component_not_found": "ErrComponentNotFound",
+    "config_validation_failed": "ErrMarketplaceConfigInvalid",
+    "download_token_invalid_or_expired": "ErrUpdateDownload",
+    "incompatible_platform": "ErrMarketplaceIncompatible",
+    "install_required": "ErrMarketplaceInstallRequired",
+    "internal_error": "ErrInvalidServerResponse",
+    "invalid_file_key": "ErrUploadInvalid",
+    "invalid_form_data": "ErrUploadInvalid",
+    "invalid_license_signature": "ErrLicenseInvalid",
+    "invalid_request": "ErrInvalidRequest",
+    "lease_revoked": "ErrLeaseRevoked",
+    "license_creation_failed": "ErrLicenseCreationFailed",
+    "license_expired": "ErrLicenseExpired",
+    "license_inactive": "ErrLicenseInvalid",
+    "license_invalid": "ErrLicenseInvalid",
+    "license_not_found": "ErrLicenseInvalid",
+    "license_revoked": "ErrLicenseInvalid",
+    "license_suspended": "ErrLicenseSuspended",
+    "machine_banned": "ErrMachineBanned",
+    "machine_invalid": "ErrMachineBanned",
+    "machine_not_registered": "ErrMachineNotRegistered",
+    "max_machines_exceeded": "ErrMaxMachinesExceeded",
+    "missing_file": "ErrMissingParameter",
+    "missing_file_key": "ErrMissingParameter",
+    "missing_license_key": "ErrMissingParameter",
+    "missing_params": "ErrMissingParameter",
+    "missing_plugin_slug": "ErrMissingParameter",
+    "missing_project_slug": "ErrMissingParameter",
+    "missing_slug": "ErrMissingParameter",
+    "missing_user_id": "ErrMissingParameter",
+    "nonce_reused": "ErrNonceReused",
+    "not_found": "ErrNotFound",
+    "not_installed": "ErrMarketplaceNotInstalled",
+    "ota_disabled": "ErrPluginOTADisabled",
+    "plugin_not_found": "ErrPluginNotFound",
+    "project_not_authorized": "ErrProjectNotAuthorized",
+    "project_not_found": "ErrProjectNotFound",
+    "server_misconfigured": "ErrInvalidServerResponse",
+    "timestamp_expired": "ErrTimestampExpired",
+    "update_frozen": "ErrUpdateFrozen",
+    "version_not_found": "ErrNotFound"
+  },
+  "paths": {
+    "/api/v1/activate": {
+      "post": {
+        "operationId": "activateLicense",
+        "x-sdk-method": "Activate",
+        "x-sdk-error-codes": [
+          "invalid_request",
+          "cdk_not_found",
+          "cdk_already_used",
+          "cdk_revoked",
+          "project_not_found",
+          "license_creation_failed",
+          "internal_error",
+          "server_misconfigured"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Activation succeeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivateResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/api/v1/verify": {
+      "post": {
+        "operationId": "verifyLicense",
+        "x-sdk-method": "Guard.Start/verifyOnline",
+        "x-sdk-error-codes": [
+          "invalid_request",
+          "timestamp_expired",
+          "nonce_reused",
+          "license_not_found",
+          "project_not_found",
+          "project_not_authorized",
+          "binary_not_recognized",
+          "invalid_license_signature",
+          "license_inactive",
+          "license_expired",
+          "max_machines_exceeded",
+          "machine_banned",
+          "internal_error",
+          "server_misconfigured"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "License verified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/api/v1/heartbeat": {
+      "post": {
+        "operationId": "sendHeartbeat",
+        "x-sdk-method": "Guard heartbeat loop",
+        "x-sdk-error-codes": [
+          "invalid_request",
+          "timestamp_expired",
+          "nonce_reused",
+          "license_not_found",
+          "project_not_found",
+          "binary_not_recognized",
+          "machine_not_registered",
+          "machine_banned",
+          "lease_revoked",
+          "internal_error",
+          "server_misconfigured"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HeartbeatRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Heartbeat accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeartbeatResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/api/v1/version/resolve": {
+      "post": {
+        "operationId": "resolveVersion",
+        "x-sdk-method": "Guard.AutoResolveVersion",
+        "x-sdk-error-codes": [
+          "invalid_request",
+          "license_invalid",
+          "license_inactive",
+          "machine_banned",
+          "version_not_found",
+          "internal_error"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VersionResolveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Version resolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionResolveResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/api/v1/update/download": {
+      "post": {
+        "operationId": "requestUpdateDownload",
+        "x-sdk-method": "Guard.requestDownloadMeta",
+        "x-sdk-error-codes": [
+          "invalid_request",
+          "license_invalid",
+          "project_not_found",
+          "project_not_authorized",
+          "update_frozen",
+          "machine_invalid",
+          "component_not_found",
+          "artifact_not_found",
+          "artifact_missing_from_storage",
+          "internal_error"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDownloadRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Download token issued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateDownloadResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/api/v1/update/fetch/{token}": {
+      "get": {
+        "operationId": "fetchUpdateArtifact",
+        "x-sdk-method": "Guard.downloadArtifactWithProgress",
+        "x-sdk-error-codes": [
+          "missing_params",
+          "download_token_invalid_or_expired",
+          "artifact_missing",
+          "not_found"
+        ],
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "machine_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Artifact stream",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/api/v1/plugins/catalog": {
+      "get": {
+        "operationId": "getPluginCatalog",
+        "x-sdk-method": "Guard.GetPluginCatalog",
+        "x-sdk-error-codes": [
+          "invalid_request",
+          "license_invalid",
+          "project_not_found",
+          "project_not_authorized",
+          "machine_invalid"
+        ],
+        "responses": {
+          "200": {
+            "description": "Plugin catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginCatalog"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/api/v1/plugins/{slug}/update": {
+      "post": {
+        "operationId": "requestPluginUpdate",
+        "x-sdk-method": "Guard.RequestPluginUpdate/UpdatePlugin",
+        "x-sdk-error-codes": [
+          "missing_plugin_slug",
+          "invalid_request",
+          "license_invalid",
+          "project_not_found",
+          "project_not_authorized",
+          "machine_invalid",
+          "update_frozen",
+          "plugin_not_found",
+          "ota_disabled",
+          "artifact_not_found",
+          "artifact_missing_from_storage",
+          "internal_error"
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plugin update package",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginUpdatePackage"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/api/v1/feedbacks": {
+      "get": {
+        "operationId": "listFeedback",
+        "x-sdk-method": "Guard.ListMyFeedback",
+        "x-sdk-error-codes": [
+          "missing_license_key",
+          "missing_project_slug",
+          "missing_user_id",
+          "license_invalid"
+        ],
+        "responses": {
+          "200": {
+            "description": "Feedback list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackListResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      },
+      "post": {
+        "operationId": "submitFeedback",
+        "x-sdk-method": "Guard.SubmitFeedback",
+        "x-sdk-error-codes": [
+          "invalid_request",
+          "license_invalid",
+          "machine_invalid",
+          "internal_error"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitFeedbackRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Feedback item created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackItem"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/api/v1/feedbacks/upload-url": {
+      "post": {
+        "operationId": "prepareFeedbackUpload",
+        "x-sdk-method": "Guard.UploadFeedbackFile",
+        "x-sdk-error-codes": [
+          "invalid_request",
+          "license_invalid"
+        ],
+        "responses": {
+          "200": {
+            "description": "Upload target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadURLResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/api/v1/feedbacks/upload": {
+      "post": {
+        "operationId": "uploadFeedbackFile",
+        "x-sdk-method": "Guard.UploadFeedbackFile",
+        "x-sdk-error-codes": [
+          "invalid_form_data",
+          "missing_license_key",
+          "missing_project_slug",
+          "missing_file_key",
+          "missing_file",
+          "invalid_file_key",
+          "license_invalid"
+        ],
+        "responses": {
+          "200": {
+            "description": "Upload result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadURLResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/api/v1/feedbacks/release-notes": {
+      "get": {
+        "operationId": "fetchReleaseNotes",
+        "x-sdk-method": "Guard.FetchReleaseNotes",
+        "x-sdk-error-codes": [
+          "missing_license_key",
+          "missing_project_slug",
+          "license_invalid"
+        ],
+        "responses": {
+          "200": {
+            "description": "Release notes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleaseNotesResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/api/v1/marketplace/browse": {
+      "get": {
+        "operationId": "getMarketplaceCatalog",
+        "x-sdk-method": "Guard.GetMarketplaceCatalog",
+        "x-sdk-error-codes": [
+          "invalid_request"
+        ],
+        "responses": {
+          "200": {
+            "description": "Marketplace catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketplaceCatalog"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/api/v1/marketplace/{slug}": {
+      "get": {
+        "operationId": "getMarketplaceItem",
+        "x-sdk-method": "Guard.GetMarketplaceItem",
+        "x-sdk-error-codes": [
+          "missing_slug",
+          "not_found"
+        ],
+        "responses": {
+          "200": {
+            "description": "Marketplace item",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketplaceDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/api/v1/marketplace/{slug}/reviews": {
+      "get": {
+        "operationId": "getMarketplaceReviews",
+        "x-sdk-method": "Guard.GetMarketplaceReviews",
+        "x-sdk-error-codes": [
+          "missing_slug",
+          "invalid_request",
+          "not_found"
+        ],
+        "responses": {
+          "200": {
+            "description": "Marketplace reviews",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketplaceReviewList"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/api/v1/marketplace/{slug}/install": {
+      "post": {
+        "operationId": "installMarketplaceItem",
+        "x-sdk-method": "Guard.InstallMarketplaceItem",
+        "x-sdk-error-codes": [
+          "missing_slug",
+          "invalid_request",
+          "license_invalid",
+          "project_not_found",
+          "project_not_authorized",
+          "machine_invalid",
+          "not_found",
+          "incompatible_platform",
+          "artifact_missing_from_storage",
+          "internal_error"
+        ],
+        "responses": {
+          "200": {
+            "description": "Marketplace install package",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketplaceInstallPackage"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/api/v1/marketplace/{slug}/uninstall": {
+      "post": {
+        "operationId": "uninstallMarketplaceItem",
+        "x-sdk-method": "Guard.UninstallMarketplaceItem",
+        "x-sdk-error-codes": [
+          "missing_slug",
+          "invalid_request",
+          "license_invalid",
+          "project_not_found",
+          "project_not_authorized",
+          "machine_invalid",
+          "not_found",
+          "not_installed"
+        ],
+        "responses": {
+          "200": {
+            "description": "Marketplace item uninstalled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketplaceActionResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/api/v1/marketplace/{slug}/configure": {
+      "post": {
+        "operationId": "configureMarketplaceItem",
+        "x-sdk-method": "Guard.ConfigureMarketplaceItem",
+        "x-sdk-error-codes": [
+          "missing_slug",
+          "invalid_request",
+          "license_invalid",
+          "project_not_found",
+          "project_not_authorized",
+          "machine_invalid",
+          "not_found",
+          "config_validation_failed",
+          "not_installed"
+        ],
+        "responses": {
+          "200": {
+            "description": "Marketplace item configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketplaceActionResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/api/v1/marketplace/{slug}/status": {
+      "post": {
+        "operationId": "reportMarketplaceStatus",
+        "x-sdk-method": "Guard.ReportMarketplaceStatus",
+        "x-sdk-error-codes": [
+          "missing_slug",
+          "invalid_request",
+          "license_invalid",
+          "project_not_found",
+          "project_not_authorized",
+          "machine_invalid",
+          "not_found",
+          "not_installed"
+        ],
+        "responses": {
+          "200": {
+            "description": "Marketplace status recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketplaceActionResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    },
+    "/api/v1/marketplace/{slug}/review": {
+      "post": {
+        "operationId": "submitMarketplaceReview",
+        "x-sdk-method": "Guard.SubmitMarketplaceReview",
+        "x-sdk-error-codes": [
+          "missing_slug",
+          "invalid_request",
+          "license_invalid",
+          "project_not_found",
+          "project_not_authorized",
+          "machine_invalid",
+          "not_found",
+          "install_required",
+          "internal_error"
+        ],
+        "responses": {
+          "200": {
+            "description": "Marketplace review submitted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketplaceReviewSubmitResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/APIError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "responses": {
+      "APIError": {
+        "description": "Structured SDK API error envelope",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "APIError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "ActivateRequest": {
+        "type": "object",
+        "required": [
+          "code",
+          "organization"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "organization": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          }
+        }
+      },
+      "ActivateResponse": {
+        "type": "object",
+        "required": [
+          "license_key",
+          "project_slug",
+          "expires_at"
+        ],
+        "properties": {
+          "license_key": {
+            "type": "string"
+          },
+          "project_slug": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          }
+        }
+      },
+      "VerifyRequest": {
+        "type": "object",
+        "required": [
+          "license_key",
+          "machine_id",
+          "project_slug",
+          "component_slug",
+          "binary_hash",
+          "nonce",
+          "timestamp"
+        ],
+        "properties": {
+          "license_key": {
+            "type": "string"
+          },
+          "machine_id": {
+            "type": "string"
+          },
+          "project_slug": {
+            "type": "string"
+          },
+          "component_slug": {
+            "type": "string"
+          },
+          "binary_hash": {
+            "type": "string"
+          },
+          "nonce": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "integer"
+          },
+          "aux_signals": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "VerifyResponse": {
+        "type": "object",
+        "required": [
+          "lease",
+          "lease_signature",
+          "server_time"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "lease": {
+            "$ref": "#/components/schemas/Lease"
+          },
+          "lease_signature": {
+            "type": "string"
+          },
+          "server_time": {
+            "type": "string"
+          },
+          "update_frozen": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Lease": {
+        "type": "object",
+        "required": [
+          "expires_at",
+          "grace_until",
+          "issued_at",
+          "lease_id",
+          "license_key",
+          "machine_id",
+          "max_machines",
+          "project_slug",
+          "server_time",
+          "tier"
+        ],
+        "properties": {
+          "expires_at": {
+            "type": "string"
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "grace_until": {
+            "type": "string"
+          },
+          "issued_at": {
+            "type": "string"
+          },
+          "lease_id": {
+            "type": "string"
+          },
+          "license_key": {
+            "type": "string"
+          },
+          "machine_id": {
+            "type": "string"
+          },
+          "max_machines": {
+            "type": "integer"
+          },
+          "project_slug": {
+            "type": "string"
+          },
+          "server_time": {
+            "type": "string"
+          },
+          "tier": {
+            "type": "string"
+          }
+        }
+      },
+      "HeartbeatRequest": {
+        "type": "object",
+        "required": [
+          "license_key",
+          "machine_id",
+          "project_slug",
+          "components",
+          "nonce",
+          "timestamp",
+          "binary_hash"
+        ],
+        "properties": {
+          "license_key": {
+            "type": "string"
+          },
+          "machine_id": {
+            "type": "string"
+          },
+          "project_slug": {
+            "type": "string"
+          },
+          "component_slug": {
+            "type": "string"
+          },
+          "components": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "slug",
+                "version"
+              ],
+              "properties": {
+                "slug": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "nonce": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "integer"
+          },
+          "binary_hash": {
+            "type": "string"
+          }
+        }
+      },
+      "HeartbeatResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "server_time",
+          "lease",
+          "lease_signature",
+          "response_signature",
+          "nonce",
+          "updates",
+          "updates_digest"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "warn",
+              "kill"
+            ]
+          },
+          "server_time": {
+            "type": "string"
+          },
+          "lease": {
+            "$ref": "#/components/schemas/Lease"
+          },
+          "lease_signature": {
+            "type": "string"
+          },
+          "response_signature": {
+            "type": "string"
+          },
+          "nonce": {
+            "type": "string"
+          },
+          "updates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HeartbeatUpdate"
+            }
+          },
+          "updates_digest": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "HeartbeatUpdate": {
+        "type": "object",
+        "required": [
+          "component",
+          "current",
+          "latest",
+          "update_available",
+          "mandatory",
+          "release_notes"
+        ],
+        "properties": {
+          "component": {
+            "type": "string"
+          },
+          "current": {
+            "type": "string"
+          },
+          "latest": {
+            "type": "string"
+          },
+          "update_available": {
+            "type": "boolean"
+          },
+          "mandatory": {
+            "type": "boolean"
+          },
+          "release_notes": {
+            "type": "string"
+          }
+        }
+      },
+      "VersionResolveRequest": {
+        "type": "object",
+        "required": [
+          "license_key",
+          "machine_id",
+          "project_slug",
+          "component",
+          "binary_hash"
+        ],
+        "properties": {
+          "license_key": {
+            "type": "string"
+          },
+          "machine_id": {
+            "type": "string"
+          },
+          "project_slug": {
+            "type": "string"
+          },
+          "component": {
+            "type": "string"
+          },
+          "binary_hash": {
+            "type": "string"
+          }
+        }
+      },
+      "VersionResolveResponse": {
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "git_commit": {
+            "type": "string"
+          },
+          "build_time": {
+            "type": "string"
+          },
+          "os": {
+            "type": "string"
+          },
+          "arch": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdateDownloadRequest": {
+        "type": "object",
+        "required": [
+          "license_key",
+          "machine_id",
+          "project_slug",
+          "component_slug",
+          "version",
+          "os",
+          "arch"
+        ],
+        "properties": {
+          "license_key": {
+            "type": "string"
+          },
+          "machine_id": {
+            "type": "string"
+          },
+          "project_slug": {
+            "type": "string"
+          },
+          "component_slug": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "os": {
+            "type": "string"
+          },
+          "arch": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdateDownloadResponse": {
+        "type": "object",
+        "required": [
+          "download_url",
+          "sha256",
+          "signature",
+          "size_bytes",
+          "expires_in"
+        ],
+        "properties": {
+          "download_url": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer"
+          },
+          "expires_in": {
+            "type": "integer"
+          }
+        }
+      },
+      "PluginCatalog": {
+        "type": "object",
+        "required": [
+          "project_slug",
+          "machine_id",
+          "source_os",
+          "source_arch",
+          "update_frozen",
+          "plugins"
+        ],
+        "properties": {
+          "project_slug": {
+            "type": "string"
+          },
+          "machine_id": {
+            "type": "string"
+          },
+          "source_os": {
+            "type": "string"
+          },
+          "source_arch": {
+            "type": "string"
+          },
+          "update_frozen": {
+            "type": "boolean"
+          },
+          "plugins": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginInfo"
+            }
+          }
+        }
+      },
+      "PluginInfo": {
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "type",
+          "ota_enabled",
+          "update_available",
+          "can_update"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "ota_enabled": {
+            "type": "boolean"
+          },
+          "installed_version": {
+            "type": "string",
+            "nullable": true
+          },
+          "latest_version": {
+            "type": "string",
+            "nullable": true
+          },
+          "update_available": {
+            "type": "boolean"
+          },
+          "can_update": {
+            "type": "boolean"
+          },
+          "release_notes": {
+            "type": "string",
+            "nullable": true
+          },
+          "size_bytes": {
+            "type": "integer",
+            "nullable": true
+          },
+          "target_os": {
+            "type": "string",
+            "nullable": true
+          },
+          "target_arch": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "PluginUpdatePackage": {
+        "type": "object",
+        "required": [
+          "plugin",
+          "target_version",
+          "download_url",
+          "sha256",
+          "signature"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "plugin": {
+            "type": "string"
+          },
+          "current_version": {
+            "type": "string",
+            "nullable": true
+          },
+          "target_version": {
+            "type": "string"
+          },
+          "update_available": {
+            "type": "boolean"
+          },
+          "download_url": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer"
+          },
+          "release_notes": {
+            "type": "string",
+            "nullable": true
+          },
+          "expires_in": {
+            "type": "integer"
+          }
+        }
+      },
+      "SubmitFeedbackRequest": {
+        "type": "object",
+        "required": [
+          "user_id",
+          "user_name",
+          "category",
+          "title",
+          "content"
+        ],
+        "properties": {
+          "user_id": {
+            "type": "string"
+          },
+          "user_name": {
+            "type": "string"
+          },
+          "user_email": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "app_version": {
+            "type": "string"
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FeedbackAttachment"
+            }
+          }
+        }
+      },
+      "FeedbackAttachment": {
+        "type": "object",
+        "required": [
+          "kind",
+          "file_key",
+          "file_name"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "file_key": {
+            "type": "string"
+          },
+          "file_name": {
+            "type": "string"
+          },
+          "content_type": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer"
+          }
+        }
+      },
+      "FeedbackItem": {
+        "type": "object",
+        "required": [
+          "id",
+          "category",
+          "status",
+          "title",
+          "content",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "app_version": {
+            "type": "string",
+            "nullable": true
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FeedbackAttachmentInfo"
+            }
+          },
+          "replies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FeedbackReply"
+            }
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "FeedbackAttachmentInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "file_key",
+          "file_name",
+          "size_bytes"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "file_key": {
+            "type": "string"
+          },
+          "file_name": {
+            "type": "string"
+          },
+          "content_type": {
+            "type": "string",
+            "nullable": true
+          },
+          "size_bytes": {
+            "type": "integer"
+          }
+        }
+      },
+      "FeedbackReply": {
+        "type": "object",
+        "required": [
+          "id",
+          "author",
+          "author_role",
+          "content",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "author_role": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          }
+        }
+      },
+      "MarketplaceItem": {
+        "type": "object",
+        "required": [
+          "slug",
+          "item_type",
+          "name",
+          "current_version",
+          "status",
+          "stats"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "item_type": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "category": {
+            "type": "string",
+            "nullable": true
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "current_version": {
+            "type": "string"
+          },
+          "package_size_bytes": {
+            "type": "integer"
+          },
+          "thumbnail_url": {
+            "type": "string",
+            "nullable": true
+          },
+          "screenshot_urls": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "target": {
+            "type": "string",
+            "nullable": true
+          },
+          "scope": {
+            "type": "string",
+            "nullable": true
+          },
+          "manifest": {
+            "type": "object",
+            "additionalProperties": true,
+            "nullable": true
+          },
+          "os": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "type": "string"
+            }
+          },
+          "arch": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "type": "string"
+            }
+          },
+          "sdk_version_req": {
+            "type": "string",
+            "nullable": true
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dependencies": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "config_schema": {
+            "type": "object",
+            "additionalProperties": true,
+            "nullable": true
+          },
+          "status": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/MarketplaceItemStats"
+          }
+        }
+      },
+      "MarketplaceInstallPackage": {
+        "type": "object",
+        "required": [
+          "slug",
+          "item_type",
+          "version",
+          "download_url",
+          "sha256",
+          "signature"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "item_type": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "download_url": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer"
+          },
+          "expires_in": {
+            "type": "integer"
+          }
+        }
+      },
+      "FeedbackListPagination": {
+        "type": "object",
+        "required": [
+          "total",
+          "page",
+          "page_size"
+        ],
+        "properties": {
+          "total": {
+            "type": "integer"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "page_size": {
+            "type": "integer"
+          }
+        }
+      },
+      "FeedbackListResponse": {
+        "type": "object",
+        "required": [
+          "data",
+          "pagination"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FeedbackItem"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/FeedbackListPagination"
+          }
+        }
+      },
+      "UploadURLResponse": {
+        "type": "object",
+        "required": [
+          "file_key"
+        ],
+        "properties": {
+          "upload_url": {
+            "type": "string"
+          },
+          "file_key": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer"
+          }
+        }
+      },
+      "ResolvedFeedback": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "category"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          }
+        }
+      },
+      "ReleaseNoteEntry": {
+        "type": "object",
+        "required": [
+          "version",
+          "release_notes"
+        ],
+        "properties": {
+          "component_slug": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "release_notes": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "feedbacks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ResolvedFeedback"
+            }
+          },
+          "resolved_feedbacks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ResolvedFeedback"
+            }
+          }
+        }
+      },
+      "ReleaseNotesResponse": {
+        "type": "object",
+        "properties": {
+          "releases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReleaseNoteEntry"
+            }
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReleaseNoteEntry"
+            }
+          }
+        }
+      },
+      "MarketplaceItemStats": {
+        "type": "object",
+        "required": [
+          "rating_count",
+          "rating_avg",
+          "install_count"
+        ],
+        "properties": {
+          "rating_count": {
+            "type": "integer"
+          },
+          "rating_avg": {
+            "type": "number"
+          },
+          "install_count": {
+            "type": "integer"
+          }
+        }
+      },
+      "MarketplaceCatalog": {
+        "type": "object",
+        "required": [
+          "page",
+          "page_size",
+          "total",
+          "items"
+        ],
+        "properties": {
+          "page": {
+            "type": "integer"
+          },
+          "page_size": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MarketplaceItem"
+            }
+          }
+        }
+      },
+      "MarketplaceInstallState": {
+        "type": "object",
+        "required": [
+          "status",
+          "install_count",
+          "last_install_at"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "install_count": {
+            "type": "integer"
+          },
+          "installed_version": {
+            "type": "string",
+            "nullable": true
+          },
+          "last_install_at": {
+            "type": "string"
+          },
+          "last_uninstall_at": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "MarketplaceDetail": {
+        "type": "object",
+        "required": [
+          "item"
+        ],
+        "properties": {
+          "item": {
+            "$ref": "#/components/schemas/MarketplaceItem"
+          },
+          "my_install": {
+            "$ref": "#/components/schemas/MarketplaceInstallState",
+            "nullable": true
+          }
+        }
+      },
+      "MarketplaceReview": {
+        "type": "object",
+        "required": [
+          "id",
+          "score",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "score": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string",
+            "nullable": true
+          },
+          "content": {
+            "type": "string",
+            "nullable": true
+          },
+          "customer": {
+            "type": "string",
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "MarketplaceReviewList": {
+        "type": "object",
+        "required": [
+          "page",
+          "page_size",
+          "total",
+          "reviews"
+        ],
+        "properties": {
+          "page": {
+            "type": "integer"
+          },
+          "page_size": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "reviews": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MarketplaceReview"
+            }
+          }
+        }
+      },
+      "MarketplaceReviewSubmitResult": {
+        "type": "object",
+        "required": [
+          "message",
+          "item_slug",
+          "stats"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "item_slug": {
+            "type": "string"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/MarketplaceItemStats"
+          }
+        }
+      },
+      "MarketplaceActionResponse": {
+        "type": "object",
+        "required": [
+          "message",
+          "slug"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "is_active": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

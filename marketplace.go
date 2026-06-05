@@ -33,7 +33,9 @@ type MarketplaceItem struct {
 	CurrentVersion   string               `json:"current_version"`
 	PackageSizeBytes int64                `json:"package_size_bytes"`
 	ThumbnailKey     *string              `json:"thumbnail_key"`
+	ThumbnailURL     *string              `json:"thumbnail_url"`
 	Screenshots      []string             `json:"screenshots"`
+	ScreenshotURLs   []string             `json:"screenshot_urls"`
 	Target           *string              `json:"target"`
 	Scope            *string              `json:"scope"`
 	Manifest         map[string]any       `json:"manifest"`
@@ -117,21 +119,7 @@ type MarketplaceBrowseOptions struct {
 	PageSize int
 }
 
-type MarketplaceAPIError struct {
-	StatusCode int
-	Code       string
-	Message    string
-}
-
-func (e *MarketplaceAPIError) Error() string {
-	if e == nil {
-		return ""
-	}
-	if e.Message != "" {
-		return fmt.Sprintf("marketplace api error (%d:%s): %s", e.StatusCode, e.Code, e.Message)
-	}
-	return fmt.Sprintf("marketplace api error (%d:%s)", e.StatusCode, e.Code)
-}
+type MarketplaceAPIError = APIError
 
 // IsMarketplaceError reports whether err contains MarketplaceAPIError.
 // If code is empty, this only checks the error type.
@@ -157,7 +145,7 @@ func (g *Guard) marketplaceAccessBody() map[string]any {
 }
 
 func (g *Guard) marketplaceRequest(ctx context.Context, method, path string, query url.Values, body any, result any) error {
-	fullURL := g.cfg.ServerURL + path
+	fullURL := serverURLForPath(g.cfg.ServerURL, path)
 	if len(query) > 0 {
 		fullURL += "?" + query.Encode()
 	}
@@ -187,47 +175,16 @@ func (g *Guard) marketplaceRequest(ctx context.Context, method, path string, que
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return decodeMarketplaceAPIError(resp)
+		return decodeAPIErrorResponse(resp)
 	}
 	if result == nil {
 		return nil
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+	if err := decodeAPIJSONResponse(resp, result); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
 	return nil
-}
-
-func decodeMarketplaceAPIError(resp *http.Response) error {
-	type errorEnvelope struct {
-		Error   string `json:"error"`
-		Message string `json:"message"`
-	}
-
-	raw, _ := io.ReadAll(resp.Body)
-	envelope := errorEnvelope{}
-	if len(raw) > 0 {
-		_ = json.Unmarshal(raw, &envelope)
-	}
-
-	code := envelope.Error
-	if code == "" {
-		code = "request_failed"
-	}
-	message := envelope.Message
-	if message == "" {
-		message = strings.TrimSpace(string(raw))
-	}
-	if message == "" {
-		message = http.StatusText(resp.StatusCode)
-	}
-
-	return &MarketplaceAPIError{
-		StatusCode: resp.StatusCode,
-		Code:       code,
-		Message:    message,
-	}
 }
 
 func (g *Guard) GetMarketplaceCatalog(ctx context.Context, options MarketplaceBrowseOptions) (*MarketplaceCatalog, error) {

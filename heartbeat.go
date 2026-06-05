@@ -2,12 +2,13 @@ package sdk
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"time"
 )
 
@@ -40,7 +41,7 @@ func (g *Guard) startHeartbeat(ctx context.Context, done chan struct{}) {
 		defer g.finishHeartbeat(done)
 
 		for {
-			jitter := time.Duration(float64(interval) * (0.9 + rand.Float64()*0.2))
+			jitter := heartbeatJitter(interval)
 			select {
 			case <-ctx.Done():
 				return
@@ -77,6 +78,26 @@ func (g *Guard) startHeartbeat(ctx context.Context, done chan struct{}) {
 	}()
 }
 
+func heartbeatJitter(interval time.Duration) time.Duration {
+	if interval <= 0 {
+		return 0
+	}
+	delta := interval / 10
+	if delta <= 0 {
+		return interval
+	}
+	const maxDuration = time.Duration(1<<63 - 1)
+	if interval > maxDuration-delta {
+		return interval
+	}
+	maxOffset := delta * 2
+	offset, err := rand.Int(rand.Reader, big.NewInt(int64(maxOffset)+1))
+	if err != nil {
+		return interval
+	}
+	return interval - delta + time.Duration(offset.Int64())
+}
+
 func (g *Guard) sendHeartbeat(parent context.Context) error {
 	g.mu.RLock()
 	currentVersion := g.version
@@ -103,7 +124,10 @@ func (g *Guard) sendHeartbeat(parent context.Context) error {
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrNetworkError, err)
 	}
-	nonce := randomNonce()
+	nonce, err := randomNonce()
+	if err != nil {
+		return err
+	}
 	reqBody := map[string]any{
 		"license_key":    g.cfg.LicenseKey,
 		"machine_id":     g.fingerprint.MachineID(),
@@ -121,6 +145,10 @@ func (g *Guard) sendHeartbeat(parent context.Context) error {
 	if err := g.postJSON(ctx, "/api/v1/heartbeat", reqBody, &resp); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		var apiErr *APIError
+		if errors.As(err, &apiErr) {
+			return err
 		}
 		return fmt.Errorf("%w: %v", ErrNetworkError, err)
 	}
@@ -234,5 +262,5 @@ func (g *Guard) persistGrace() error {
 }
 
 func isFatalError(err error) bool {
-	return err == ErrBanned || err == ErrLicenseSuspended || err == ErrMachineBanned
+	return errors.Is(err, ErrBanned) || errors.Is(err, ErrLicenseSuspended) || errors.Is(err, ErrMachineBanned)
 }

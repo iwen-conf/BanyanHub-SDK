@@ -91,6 +91,18 @@ if err != nil {
 fmt.Printf("许可证密钥: %s（有效期至: %s）\n", result.LicenseKey, result.ExpiresAt)
 ```
 
+生产 HTTPS 激活建议改用 `ActivateWithOptions`，让首次请求和 `Guard` 一样走 SPKI pinning：
+
+```go
+result, err := sdk.ActivateWithOptions(sdk.ActivationOptions{
+    ServerURL:        "https://guard.example.com",
+    Code:             "CDK-A1B2-C3D4-E5F6-G7H8",
+    Organization:     "Acme Corp",
+    Email:            "admin@acme.com",
+    PinnedSPKIHashes: []string{"base64-spki-primary", "base64-spki-rotation"},
+})
+```
+
 ## 完整配置
 
 ```go

@@ -92,6 +92,18 @@ if err != nil {
 fmt.Printf("License Key: %s (expires: %s)\n", result.LicenseKey, result.ExpiresAt)
 ```
 
+For production HTTPS activation, prefer `ActivateWithOptions` so the first request uses the same SPKI pinning model as `Guard`:
+
+```go
+result, err := sdk.ActivateWithOptions(sdk.ActivationOptions{
+    ServerURL:        "https://guard.example.com",
+    Code:             "CDK-A1B2-C3D4-E5F6-G7H8",
+    Organization:     "Acme Corp",
+    Email:            "admin@acme.com",
+    PinnedSPKIHashes: []string{"base64-spki-primary", "base64-spki-rotation"},
+})
+```
+
 ## Configuration
 
 ```go

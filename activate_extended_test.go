@@ -38,9 +38,9 @@ func TestActivate_SuccessWithAllFields(t *testing.T) {
 		if r.URL.Path == "/api/v1/activate" {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
-				"license_key":   "activated-license-key",
-				"project_slug":  "test-project",
-				"expires_at":    "2027-02-23T00:00:00Z",
+				"license_key":  "activated-license-key",
+				"project_slug": "test-project",
+				"expires_at":   "2027-02-23T00:00:00Z",
 			})
 		}
 	}))

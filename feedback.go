@@ -2,14 +2,12 @@ package sdk
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 )
 
 // ---------------------------------------------------------------------------
@@ -171,6 +169,7 @@ func (g *Guard) SubmitFeedback(ctx context.Context, req SubmitFeedbackRequest) (
 func (g *Guard) ListMyFeedback(ctx context.Context, userID string, page, pageSize int) (*FeedbackListResponse, error) {
 	query := url.Values{}
 	query.Set("license_key", g.cfg.LicenseKey)
+	query.Set("project_slug", g.cfg.ProjectSlug)
 	query.Set("user_id", userID)
 	query.Set("page", strconv.Itoa(page))
 	query.Set("page_size", strconv.Itoa(pageSize))
@@ -230,16 +229,16 @@ func (g *Guard) UploadFeedbackFile(ctx context.Context, fileName string, content
 
 	resp, err := g.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("send upload request: %w", err)
+		return nil, fmt.Errorf("%w: %v", ErrNetworkError, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%w: status %d", ErrInvalidServerResponse, resp.StatusCode)
+		return nil, decodeAPIErrorResponse(resp)
 	}
 
 	var result UploadURLResponse
-	if err := decodeJSON(resp.Body, &result); err != nil {
+	if err := decodeAPIJSONResponse(resp, &result); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
 	if result.FileKey == "" {
@@ -272,18 +271,13 @@ func (g *Guard) feedbackUploadURL(uploadURL string) string {
 	if uploadURL == "" {
 		uploadURL = "/api/v1/feedbacks/upload"
 	}
-	if strings.HasPrefix(uploadURL, "http://") || strings.HasPrefix(uploadURL, "https://") {
-		return uploadURL
-	}
-	if !strings.HasPrefix(uploadURL, "/") {
-		uploadURL = "/" + uploadURL
-	}
-	return g.cfg.ServerURL + uploadURL
+	return serverURLForPath(g.cfg.ServerURL, uploadURL)
 }
 
 // FetchReleaseNotes retrieves the release notes grouped by version.
 func (g *Guard) FetchReleaseNotes(ctx context.Context) (*ReleaseNotesResponse, error) {
 	query := url.Values{}
+	query.Set("license_key", g.cfg.LicenseKey)
 	query.Set("project_slug", g.cfg.ProjectSlug)
 
 	var wire releaseNotesWireResponse
@@ -291,11 +285,6 @@ func (g *Guard) FetchReleaseNotes(ctx context.Context) (*ReleaseNotesResponse, e
 		return nil, fmt.Errorf("fetch release notes: %w", err)
 	}
 	return wire.toSDKResponse(), nil
-}
-
-// decodeJSON is a small helper to decode JSON from a reader.
-func decodeJSON(r io.Reader, v any) error {
-	return json.NewDecoder(r).Decode(v)
 }
 
 type releaseNotesWireResponse struct {

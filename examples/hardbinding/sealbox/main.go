@@ -25,10 +25,10 @@ type lease struct {
 
 func main() {
 	var (
-		leasePath      = flag.String("lease", "", "path to canonical lease JSON")
-		signatureB64   = flag.String("signature", "", "base64 lease signature")
-		configPath     = flag.String("config", "", "path to plaintext JSON config")
-		outPath        = flag.String("out", "config.sealed", "output file path")
+		leasePath    = flag.String("lease", "", "path to canonical lease JSON")
+		signatureB64 = flag.String("signature", "", "base64 lease signature")
+		configPath   = flag.String("config", "", "path to plaintext JSON config")
+		outPath      = flag.String("out", "config.sealed", "output file path")
 	)
 	flag.Parse()
 

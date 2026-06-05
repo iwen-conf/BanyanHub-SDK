@@ -5,9 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
@@ -94,7 +97,11 @@ func (ps *persistentStateStore) Load() (*persistedState, error) {
 		return nil, ErrStateTampered
 	}
 
-	if !ps.verifySignature(envelope.Payload, envelope.Signature) {
+	valid, err := ps.verifySignature(envelope.Payload, envelope.Signature)
+	if err != nil {
+		return nil, err
+	}
+	if !valid {
 		return nil, ErrStateTampered
 	}
 
@@ -119,9 +126,13 @@ func (ps *persistentStateStore) Save(state *persistedState) error {
 	if err != nil {
 		return err
 	}
+	signature, err := ps.signPayload(payload)
+	if err != nil {
+		return err
+	}
 	envelope := persistedEnvelope{
 		Payload:   payload,
-		Signature: ps.signPayload(payload),
+		Signature: signature,
 	}
 	data, err := json.Marshal(envelope)
 	if err != nil {
@@ -132,7 +143,7 @@ func (ps *persistentStateStore) Save(state *persistedState) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(dir, "state.bin"), data, 0o600); err != nil {
+	if err := writeFileAtomic(filepath.Join(dir, "state.bin"), data, 0o600); err != nil {
 		return err
 	}
 
@@ -148,29 +159,85 @@ func (ps *persistentStateStore) Save(state *persistedState) error {
 	return nil
 }
 
-func (ps *persistentStateStore) signPayload(payload []byte) string {
-	key := ps.deriveStateKey()
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpName)
+		}
+	}()
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := renameAtomic(tmpName, path); err != nil {
+		return err
+	}
+	cleanup = false
+	return nil
+}
+
+func renameAtomic(tmpName, path string) error {
+	if err := os.Rename(tmpName, path); err != nil {
+		if runtime.GOOS != "windows" {
+			return err
+		}
+		if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return err
+		}
+		return os.Rename(tmpName, path)
+	}
+	return nil
+}
+
+func (ps *persistentStateStore) signPayload(payload []byte) (string, error) {
+	key, err := ps.deriveStateKey()
+	if err != nil {
+		return "", err
+	}
 	mac := hmac.New(sha256.New, key)
 	mac.Write(payload)
-	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
+	return base64.StdEncoding.EncodeToString(mac.Sum(nil)), nil
 }
 
-func (ps *persistentStateStore) verifySignature(payload []byte, signature string) bool {
-	expected, err1 := base64.StdEncoding.DecodeString(ps.signPayload(payload))
+func (ps *persistentStateStore) verifySignature(payload []byte, signature string) (bool, error) {
+	expectedSignature, err := ps.signPayload(payload)
+	if err != nil {
+		return false, err
+	}
+	expected, err1 := base64.StdEncoding.DecodeString(expectedSignature)
 	actual, err2 := base64.StdEncoding.DecodeString(signature)
 	if err1 != nil || err2 != nil {
-		return false
+		return false, nil
 	}
-	return hmac.Equal(expected, actual)
+	return hmac.Equal(expected, actual), nil
 }
 
-func (ps *persistentStateStore) deriveStateKey() []byte {
+func (ps *persistentStateStore) deriveStateKey() ([]byte, error) {
 	reader := hkdf.New(sha256.New, []byte(ps.fingerprint.MachineID()), []byte(ps.cfg.ProjectSlug), []byte(ps.cfg.ComponentSlug+"|state"))
 	key := make([]byte, 32)
-	if _, err := reader.Read(key); err != nil {
-		panic(fmt.Sprintf("hkdf read failed: %v", err))
+	if _, err := io.ReadFull(reader, key); err != nil {
+		return nil, fmt.Errorf("derive state key: %w", err)
 	}
-	return key
+	return key, nil
 }
 
 func (ps *persistentStateStore) cacheDir() string {

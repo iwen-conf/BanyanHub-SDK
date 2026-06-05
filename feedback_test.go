@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -105,6 +106,120 @@ func TestUploadFeedbackFile_UsesPreparedFileKey(t *testing.T) {
 	}
 }
 
+func TestUploadFeedbackFile_DecodesStructuredAPIError(t *testing.T) {
+	const fileKey = "feedbacks/demo-project/upload-1/screenshot.png"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/feedbacks/upload-url":
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"upload_url": "/api/v1/feedbacks/upload",
+				"file_key":   fileKey,
+			})
+		case "/api/v1/feedbacks/upload":
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error":   "invalid_file_key",
+				"message": "file key does not match project scope",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	guard := newFeedbackTestGuard(t, srv.URL)
+	_, err := guard.UploadFeedbackFile(context.Background(), "screenshot.png", "image/png", bytes.NewBufferString("payload"))
+	if err == nil {
+		t.Fatal("expected upload error")
+	}
+	if !errors.Is(err, ErrUploadInvalid) {
+		t.Fatalf("expected ErrUploadInvalid, got %v", err)
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected APIError, got %T", err)
+	}
+	if apiErr.Code != "invalid_file_key" || apiErr.Message != "file key does not match project scope" {
+		t.Fatalf("unexpected API error payload: %#v", apiErr)
+	}
+}
+
+func TestUploadFeedbackFile_PrepareUploadUsesLicenseInvalid(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/feedbacks/upload-url" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error":   "license_invalid",
+			"message": "license is not authorized for this feedback project",
+		})
+	}))
+	defer srv.Close()
+
+	guard := newFeedbackTestGuard(t, srv.URL)
+	_, err := guard.UploadFeedbackFile(context.Background(), "screenshot.png", "image/png", bytes.NewBufferString("payload"))
+	if err == nil {
+		t.Fatal("expected upload preparation error")
+	}
+	if !errors.Is(err, ErrLicenseInvalid) {
+		t.Fatalf("expected ErrLicenseInvalid, got %v", err)
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected APIError, got %T", err)
+	}
+	if apiErr.Code != "license_invalid" {
+		t.Fatalf("unexpected API error code: %#v", apiErr)
+	}
+}
+
+func TestListMyFeedback_SendsProjectSlug(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/feedbacks" {
+			http.NotFound(w, r)
+			return
+		}
+		query := r.URL.Query()
+		if got := query.Get("license_key"); got != "LIC-FEEDBACK-001" {
+			t.Fatalf("unexpected license key: %s", got)
+		}
+		if got := query.Get("project_slug"); got != "demo-project" {
+			t.Fatalf("unexpected project slug: %s", got)
+		}
+		if got := query.Get("user_id"); got != "user-001" {
+			t.Fatalf("unexpected user id: %s", got)
+		}
+		if got := query.Get("page"); got != "2" {
+			t.Fatalf("unexpected page: %s", got)
+		}
+		if got := query.Get("page_size"); got != "25" {
+			t.Fatalf("unexpected page_size: %s", got)
+		}
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{},
+			"pagination": map[string]any{
+				"total":     0,
+				"page":      2,
+				"page_size": 25,
+			},
+		})
+	}))
+	defer srv.Close()
+
+	guard := newFeedbackTestGuard(t, srv.URL)
+	resp, err := guard.ListMyFeedback(context.Background(), "user-001", 2, 25)
+	if err != nil {
+		t.Fatalf("list feedback: %v", err)
+	}
+	if resp.PageNum() != 2 || resp.Size() != 25 || resp.Total() != 0 {
+		t.Fatalf("unexpected pagination: %#v", resp.Pagination)
+	}
+}
+
 func TestFetchReleaseNotes_WorkerReleasesShape(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/feedbacks/release-notes" {
@@ -113,6 +228,9 @@ func TestFetchReleaseNotes_WorkerReleasesShape(t *testing.T) {
 		}
 		if got := r.URL.Query().Get("project_slug"); got != "demo-project" {
 			t.Fatalf("unexpected project slug query: %s", got)
+		}
+		if got := r.URL.Query().Get("license_key"); got != "LIC-FEEDBACK-001" {
+			t.Fatalf("unexpected license key query: %s", got)
 		}
 
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -156,6 +274,9 @@ func TestFetchReleaseNotes_LegacyEntriesShape(t *testing.T) {
 		if r.URL.Path != "/api/v1/feedbacks/release-notes" {
 			http.NotFound(w, r)
 			return
+		}
+		if got := r.URL.Query().Get("license_key"); got != "LIC-FEEDBACK-001" {
+			t.Fatalf("unexpected license key query: %s", got)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"entries": []map[string]any{

@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -69,6 +70,11 @@ func (g *Guard) verifyOnline(parent context.Context, now time.Time) (*lease, str
 		return nil, "", fmt.Errorf("%w: %v", ErrNetworkError, err)
 	}
 
+	nonce, err := randomNonce()
+	if err != nil {
+		return nil, "", err
+	}
+
 	reqBody := map[string]any{
 		"license_key":    g.cfg.LicenseKey,
 		"machine_id":     g.fingerprint.MachineID(),
@@ -78,7 +84,7 @@ func (g *Guard) verifyOnline(parent context.Context, now time.Time) (*lease, str
 		"hostname":       hostname(),
 		"os":             g.fingerprint.auxSignals["os"],
 		"arch":           g.fingerprint.auxSignals["arch"],
-		"nonce":          randomNonce(),
+		"nonce":          nonce,
 		"timestamp":      now.Unix(),
 		"binary_hash":    binaryHash,
 	}
@@ -88,6 +94,10 @@ func (g *Guard) verifyOnline(parent context.Context, now time.Time) (*lease, str
 	defer cancel()
 
 	if err := g.postJSON(ctx, "/api/v1/verify", reqBody, &resp); err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) {
+			return nil, "", err
+		}
 		return nil, "", fmt.Errorf("%w: %v", ErrNetworkError, err)
 	}
 	if resp.Error != "" {

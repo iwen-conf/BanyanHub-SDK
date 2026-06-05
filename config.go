@@ -1,7 +1,10 @@
 package sdk
 
 import (
+	"fmt"
+	"net/url"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -10,9 +13,9 @@ import (
 const DefaultServerURL = "https://guard.iluwen.cn"
 
 type Config struct {
-	ServerURL    string
-	LicenseKey   string
-	PublicKeyPEM []byte
+	ServerURL           string
+	LicenseKey          string
+	PublicKeyPEM        []byte
 	LegacyPublicKeysPEM [][]byte
 
 	ProjectSlug   string
@@ -63,27 +66,63 @@ func (c *Config) setDefaults() {
 	if c.ServerURL == "" {
 		c.ServerURL = DefaultServerURL
 	}
-	if c.HeartbeatInterval == 0 {
+	if c.HeartbeatInterval <= 0 {
 		c.HeartbeatInterval = 1 * time.Hour
 	}
-	if c.GracePolicy.MaxOfflineDuration == 0 {
+	if c.GracePolicy.MaxOfflineDuration <= 0 {
 		c.GracePolicy.MaxOfflineDuration = 72 * time.Hour
 	}
-	if c.GracePolicy.WarningInterval == 0 {
+	if c.GracePolicy.WarningInterval <= 0 {
 		c.GracePolicy.WarningInterval = 4 * time.Hour
 	}
-	if c.OTA.CheckInterval == 0 {
+	if c.OTA.CheckInterval <= 0 {
 		c.OTA.CheckInterval = 6 * time.Hour
 	}
-	// Auto-detect OS and Arch from runtime if not configured
-	if c.OTA.OS == "" && c.OTA.Arch == "" {
+	// Auto-detect OS and Arch independently so partial overrides remain valid.
+	if c.OTA.OS == "" {
 		c.OTA.OS = runtime.GOOS
+	}
+	if c.OTA.Arch == "" {
 		c.OTA.Arch = runtime.GOARCH
 	}
-	if c.OTA.DownloadTimeout == 0 {
+	if c.OTA.DownloadTimeout <= 0 {
 		c.OTA.DownloadTimeout = 10 * time.Minute
 	}
-	if c.OTA.MaxArtifactBytes == 0 {
+	if c.OTA.MaxArtifactBytes <= 0 {
 		c.OTA.MaxArtifactBytes = 500 * 1024 * 1024 // 500MB
 	}
+}
+
+func normalizeServerURL(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		value = DefaultServerURL
+	}
+
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("%w: must be an absolute http(s) URL", ErrInvalidServerURL)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("%w: unsupported scheme %q", ErrInvalidServerURL, parsed.Scheme)
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("%w: query and fragment are not allowed", ErrInvalidServerURL)
+	}
+
+	return strings.TrimRight(parsed.String(), "/"), nil
+}
+
+func serverURLForPath(serverURL, path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return serverURL
+	}
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		return path
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return serverURL + path
 }
