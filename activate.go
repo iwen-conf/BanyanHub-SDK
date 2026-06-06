@@ -117,7 +117,11 @@ func ActivateWithOptions(opts ActivationOptions) (*ActivationResult, error) {
 	}
 
 	var result ActivationResult
-	if err := decodeAPIJSONResponse(resp, &result); err != nil {
+	raw, err := readAPIJSONResponse(resp)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
 

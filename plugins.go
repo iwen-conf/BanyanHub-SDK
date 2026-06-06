@@ -2,6 +2,7 @@ package sdk
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -52,6 +53,15 @@ type PluginUpdatePackage struct {
 	ExpiresIn       int     `json:"expires_in"`
 }
 
+type pluginUpdateRequestBody struct {
+	LicenseKey  string `json:"license_key"`
+	MachineID   string `json:"machine_id"`
+	ProjectSlug string `json:"project_slug"`
+	OS          string `json:"os"`
+	Arch        string `json:"arch"`
+	Version     string `json:"version,omitempty"`
+}
+
 // GetPluginCatalog fetches discoverable plugins and update availability for this machine.
 func (g *Guard) GetPluginCatalog(ctx context.Context, includeUninstalled bool) (*PluginCatalog, error) {
 	query := url.Values{}
@@ -65,8 +75,12 @@ func (g *Guard) GetPluginCatalog(ctx context.Context, includeUninstalled bool) (
 	}
 
 	var resp PluginCatalog
-	if err := g.getJSON(ctx, "/api/v1/plugins/catalog", query, &resp); err != nil {
+	raw, err := g.getJSON(ctx, "/api/v1/plugins/catalog", query)
+	if err != nil {
 		return nil, fmt.Errorf("request plugin catalog: %w", err)
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
 
 	return &resp, nil
@@ -104,21 +118,29 @@ func (g *Guard) RequestPluginUpdate(ctx context.Context, slug string, options Pl
 	}
 
 	osValue, archValue := g.resolveOTAPlatform(options.OS, options.Arch)
-	body := map[string]any{
-		"license_key":  g.cfg.LicenseKey,
-		"machine_id":   g.fingerprint.MachineID(),
-		"project_slug": g.cfg.ProjectSlug,
-		"os":           osValue,
-		"arch":         archValue,
+	body := pluginUpdateRequestBody{
+		LicenseKey:  g.cfg.LicenseKey,
+		MachineID:   g.fingerprint.MachineID(),
+		ProjectSlug: g.cfg.ProjectSlug,
+		OS:          osValue,
+		Arch:        archValue,
 	}
 	if strings.TrimSpace(options.Version) != "" {
-		body["version"] = strings.TrimSpace(options.Version)
+		body.Version = strings.TrimSpace(options.Version)
 	}
 
 	var resp PluginUpdatePackage
 	path := "/api/v1/plugins/" + url.PathEscape(slug) + "/update"
-	if err := g.postJSON(ctx, path, body, &resp); err != nil {
+	bodyJSON, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	raw, err := g.postJSON(ctx, path, bodyJSON)
+	if err != nil {
 		return nil, fmt.Errorf("request plugin update: %w", err)
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
 	return &resp, nil
 }

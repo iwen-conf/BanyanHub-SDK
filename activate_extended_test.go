@@ -7,6 +7,12 @@ import (
 	"testing"
 )
 
+type activateTestResponse struct {
+	LicenseKey  string `json:"license_key,omitempty"`
+	ProjectSlug string `json:"project_slug,omitempty"`
+	ExpiresAt   string `json:"expires_at,omitempty"`
+}
+
 // TestActivate_InvalidParameters tests activation with missing parameters
 func TestActivate_InvalidParameters(t *testing.T) {
 	tests := []struct {
@@ -37,10 +43,10 @@ func TestActivate_SuccessWithAllFields(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/activate" {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"license_key":  "activated-license-key",
-				"project_slug": "test-project",
-				"expires_at":   "2027-02-23T00:00:00Z",
+			json.NewEncoder(w).Encode(activateTestResponse{
+				LicenseKey:  "activated-license-key",
+				ProjectSlug: "test-project",
+				ExpiresAt:   "2027-02-23T00:00:00Z",
 			})
 		}
 	}))
@@ -76,8 +82,8 @@ func TestActivate_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": "internal_server_error",
+		json.NewEncoder(w).Encode(testAPIErrorEnvelope{
+			Error: "internal_server_error",
 		})
 	}))
 
@@ -109,8 +115,8 @@ func TestActivate_WithMinimalParameters(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/activate" {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"license_key": "key",
+			json.NewEncoder(w).Encode(activateTestResponse{
+				LicenseKey: "key",
 			})
 		}
 	}))
@@ -132,10 +138,10 @@ func TestActivate_EmptyResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/activate" {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"license_key":  "key",
-				"project_slug": "",
-				"expires_at":   "",
+			json.NewEncoder(w).Encode(activateTestResponse{
+				LicenseKey:  "key",
+				ProjectSlug: "",
+				ExpiresAt:   "",
 			})
 		}
 	}))

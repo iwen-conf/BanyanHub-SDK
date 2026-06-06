@@ -59,37 +59,37 @@ func TestMarketplaceCatalogDetailReviews(t *testing.T) {
 			if got := r.URL.Query().Get("arch"); got != "amd64" {
 				t.Fatalf("unexpected arch query: %s", got)
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"page":      1,
-				"page_size": 20,
-				"total":     1,
-				"items": []map[string]any{
+			_ = json.NewEncoder(w).Encode(MarketplaceCatalog{
+				Page:     1,
+				PageSize: 20,
+				Total:    1,
+				Items: []MarketplaceItem{
 					{
-						"slug":               "demo",
-						"item_type":          "template",
-						"name":               "Demo Template",
-						"current_version":    "1.0.0",
-						"package_size_bytes": 1234,
-						"thumbnail_url":      "/api/v1/marketplace/assets/marketplace%2Fassets%2Fitem-1%2Fthumbnail%2Fthumb.png",
-						"screenshot_urls": []string{
+						Slug:             "demo",
+						ItemType:         "template",
+						Name:             "Demo Template",
+						CurrentVersion:   "1.0.0",
+						PackageSizeBytes: 1234,
+						ThumbnailURL:     testString("/api/v1/marketplace/assets/marketplace%2Fassets%2Fitem-1%2Fthumbnail%2Fthumb.png"),
+						ScreenshotURLs: []string{
 							"/api/v1/marketplace/assets/marketplace%2Fassets%2Fitem-1%2Fscreenshots%2Fscreen.png",
 						},
-						"target":          "backend",
-						"scope":           "extension",
-						"manifest":        map[string]any{"entry": "plugin.js"},
-						"os":              []string{"linux"},
-						"arch":            []string{"amd64"},
-						"sdk_version_req": ">=1.0.0",
-						"permissions":     []string{"net.http"},
-						"dependencies":    map[string]string{"runtime": ">=1.0.0"},
-						"config_schema":   map[string]any{"type": "object"},
-						"status":          "published",
-						"created_at":      "2026-01-01T00:00:00Z",
-						"updated_at":      "2026-01-02T00:00:00Z",
-						"stats": map[string]any{
-							"rating_count":  2,
-							"rating_avg":    4.5,
-							"install_count": 8,
+						Target:        testString("backend"),
+						Scope:         testString("extension"),
+						Manifest:      MarketplaceJSON{"entry": testRawJSON(`"plugin.js"`)},
+						OS:            []string{"linux"},
+						Arch:          []string{"amd64"},
+						SDKVersionReq: testString(">=1.0.0"),
+						Permissions:   []string{"net.http"},
+						Dependencies:  map[string]string{"runtime": ">=1.0.0"},
+						ConfigSchema:  MarketplaceJSON{"type": testRawJSON(`"object"`)},
+						Status:        "published",
+						CreatedAt:     "2026-01-01T00:00:00Z",
+						UpdatedAt:     "2026-01-02T00:00:00Z",
+						Stats: MarketplaceItemStats{
+							RatingCount:  2,
+							RatingAvg:    4.5,
+							InstallCount: 8,
 						},
 					},
 				},
@@ -98,47 +98,47 @@ func TestMarketplaceCatalogDetailReviews(t *testing.T) {
 			if r.URL.Query().Get("license_key") == "" || r.URL.Query().Get("machine_id") == "" || r.URL.Query().Get("project_slug") == "" {
 				t.Fatalf("expected license/machine/project query params")
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"item": map[string]any{
-					"slug":               "demo",
-					"item_type":          "template",
-					"name":               "Demo Template",
-					"current_version":    "1.0.0",
-					"package_size_bytes": 1234,
-					"thumbnail_url":      "/api/v1/marketplace/assets/marketplace%2Fassets%2Fitem-1%2Fthumbnail%2Fthumb.png",
-					"screenshot_urls": []string{
+			_ = json.NewEncoder(w).Encode(MarketplaceDetail{
+				Item: MarketplaceItem{
+					Slug:             "demo",
+					ItemType:         "template",
+					Name:             "Demo Template",
+					CurrentVersion:   "1.0.0",
+					PackageSizeBytes: 1234,
+					ThumbnailURL:     testString("/api/v1/marketplace/assets/marketplace%2Fassets%2Fitem-1%2Fthumbnail%2Fthumb.png"),
+					ScreenshotURLs: []string{
 						"/api/v1/marketplace/assets/marketplace%2Fassets%2Fitem-1%2Fscreenshots%2Fscreen.png",
 					},
-					"status":     "published",
-					"created_at": "2026-01-01T00:00:00Z",
-					"updated_at": "2026-01-02T00:00:00Z",
-					"stats": map[string]any{
-						"rating_count":  2,
-						"rating_avg":    4.5,
-						"install_count": 8,
+					Status:    "published",
+					CreatedAt: "2026-01-01T00:00:00Z",
+					UpdatedAt: "2026-01-02T00:00:00Z",
+					Stats: MarketplaceItemStats{
+						RatingCount:  2,
+						RatingAvg:    4.5,
+						InstallCount: 8,
 					},
 				},
-				"my_install": map[string]any{
-					"status":            "installed",
-					"install_count":     1,
-					"installed_version": "1.0.0",
-					"last_install_at":   "2026-01-03T00:00:00Z",
+				MyInstall: &MarketplaceInstallState{
+					Status:           "installed",
+					InstallCount:     1,
+					InstalledVersion: testString("1.0.0"),
+					LastInstallAt:    "2026-01-03T00:00:00Z",
 				},
 			})
 		case "/api/v1/marketplace/demo/reviews":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"page":      1,
-				"page_size": 20,
-				"total":     1,
-				"reviews": []map[string]any{
+			_ = json.NewEncoder(w).Encode(MarketplaceReviewList{
+				Page:     1,
+				PageSize: 20,
+				Total:    1,
+				Reviews: []MarketplaceReview{
 					{
-						"id":         "review-1",
-						"score":      5,
-						"title":      "Great",
-						"content":    "Nice template",
-						"customer":   "Acme",
-						"created_at": "2026-01-03T00:00:00Z",
-						"updated_at": "2026-01-04T00:00:00Z",
+						ID:        "review-1",
+						Score:     5,
+						Title:     testString("Great"),
+						Content:   testString("Nice template"),
+						Customer:  testString("Acme"),
+						CreatedAt: "2026-01-03T00:00:00Z",
+						UpdatedAt: "2026-01-04T00:00:00Z",
 					},
 				},
 			})
@@ -176,7 +176,7 @@ func TestMarketplaceCatalogDetailReviews(t *testing.T) {
 	if len(catalog.Items[0].OS) != 1 || catalog.Items[0].OS[0] != "linux" {
 		t.Fatalf("unexpected item os: %#v", catalog.Items[0].OS)
 	}
-	if catalog.Items[0].ConfigSchema["type"] != "object" {
+	if string(catalog.Items[0].ConfigSchema["type"]) != `"object"` {
 		t.Fatalf("unexpected config schema: %#v", catalog.Items[0].ConfigSchema)
 	}
 	if catalog.Items[0].ID != "" || catalog.Items[0].ComponentID != nil || catalog.Items[0].TemplateID != nil {
@@ -222,52 +222,55 @@ func TestMarketplaceInstallUninstallReview(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/marketplace/demo/install":
-			var body map[string]any
+			var body marketplaceAccessBody
 			_ = json.NewDecoder(r.Body).Decode(&body)
-			if body["license_key"] != "LIC-TEST-001" {
-				t.Fatalf("unexpected license key: %v", body["license_key"])
+			if body.LicenseKey != "LIC-TEST-001" {
+				t.Fatalf("unexpected license key: %v", body.LicenseKey)
 			}
-			if body["project_slug"] != "demo-project" {
-				t.Fatalf("unexpected project slug: %v", body["project_slug"])
+			if body.ProjectSlug != "demo-project" {
+				t.Fatalf("unexpected project slug: %v", body.ProjectSlug)
 			}
-			if body["machine_id"] == "" {
+			if body.MachineID == "" {
 				t.Fatalf("missing machine_id")
 			}
 
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"message":      "ready",
-				"slug":         "demo",
-				"item_type":    "template",
-				"version":      "1.0.0",
-				"download_url": "/api/v1/marketplace/assets/dl/token-1",
-				"sha256":       "abc",
-				"signature":    "sig",
-				"size_bytes":   512,
-				"expires_in":   300,
+			_ = json.NewEncoder(w).Encode(MarketplaceInstallPackage{
+				Message:     "ready",
+				Slug:        "demo",
+				ItemType:    "template",
+				Version:     "1.0.0",
+				DownloadURL: "/api/v1/marketplace/assets/dl/token-1",
+				SHA256:      "abc",
+				Signature:   "sig",
+				SizeBytes:   512,
+				ExpiresIn:   300,
 			})
 		case "/api/v1/marketplace/demo/uninstall":
-			var body map[string]any
+			var body marketplaceAccessBody
 			_ = json.NewDecoder(r.Body).Decode(&body)
-			if body["license_key"] != "LIC-TEST-001" {
-				t.Fatalf("unexpected license key in uninstall: %v", body["license_key"])
+			if body.LicenseKey != "LIC-TEST-001" {
+				t.Fatalf("unexpected license key in uninstall: %v", body.LicenseKey)
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"message": "uninstalled",
-				"slug":    "demo",
+			_ = json.NewEncoder(w).Encode(struct {
+				Message string `json:"message"`
+				Slug    string `json:"slug"`
+			}{
+				Message: "uninstalled",
+				Slug:    "demo",
 			})
 		case "/api/v1/marketplace/demo/review":
-			var body map[string]any
+			var body marketplaceReviewBody
 			_ = json.NewDecoder(r.Body).Decode(&body)
-			if body["score"] != float64(5) {
-				t.Fatalf("unexpected score: %v", body["score"])
+			if body.Score != 5 {
+				t.Fatalf("unexpected score: %v", body.Score)
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"message":   "review_submitted",
-				"item_slug": "demo",
-				"stats": map[string]any{
-					"rating_count":  3,
-					"rating_avg":    4.7,
-					"install_count": 10,
+			_ = json.NewEncoder(w).Encode(MarketplaceReviewSubmitResult{
+				Message:  "review_submitted",
+				ItemSlug: "demo",
+				Stats: MarketplaceItemStats{
+					RatingCount:  3,
+					RatingAvg:    4.7,
+					InstallCount: 10,
 				},
 			})
 		default:
@@ -306,57 +309,60 @@ func TestMarketplaceConfigureAndStatus(t *testing.T) {
 			if r.Method != http.MethodPost {
 				t.Fatalf("unexpected configure method: %s", r.Method)
 			}
-			var body map[string]any
+			var body marketplaceConfigureBody
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatalf("decode configure body: %v", err)
 			}
-			if body["license_key"] != "LIC-TEST-001" {
-				t.Fatalf("unexpected configure license key: %v", body["license_key"])
+			if body.LicenseKey != "LIC-TEST-001" {
+				t.Fatalf("unexpected configure license key: %v", body.LicenseKey)
 			}
-			if body["project_slug"] != "demo-project" {
-				t.Fatalf("unexpected configure project slug: %v", body["project_slug"])
+			if body.ProjectSlug != "demo-project" {
+				t.Fatalf("unexpected configure project slug: %v", body.ProjectSlug)
 			}
-			if body["machine_id"] == "" {
+			if body.MachineID == "" {
 				t.Fatalf("missing configure machine_id")
 			}
-			config, ok := body["config"].(map[string]any)
-			if !ok {
-				t.Fatalf("missing config object: %#v", body["config"])
+			if string(body.Config["mode"]) != `"strict"` || string(body.Config["retries"]) != `3` {
+				t.Fatalf("unexpected config payload: %#v", body.Config)
 			}
-			if config["mode"] != "strict" || config["retries"] != float64(3) {
-				t.Fatalf("unexpected config payload: %#v", config)
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"message": "configured",
-				"slug":    "demo",
+			_ = json.NewEncoder(w).Encode(struct {
+				Message string `json:"message"`
+				Slug    string `json:"slug"`
+			}{
+				Message: "configured",
+				Slug:    "demo",
 			})
 		case "/api/v1/marketplace/demo/status":
 			if r.Method != http.MethodPost {
 				t.Fatalf("unexpected status method: %s", r.Method)
 			}
-			var body map[string]any
+			var body marketplaceStatusBody
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatalf("decode status body: %v", err)
 			}
-			if body["license_key"] != "LIC-TEST-001" {
-				t.Fatalf("unexpected status license key: %v", body["license_key"])
+			if body.LicenseKey != "LIC-TEST-001" {
+				t.Fatalf("unexpected status license key: %v", body.LicenseKey)
 			}
-			if body["project_slug"] != "demo-project" {
-				t.Fatalf("unexpected status project slug: %v", body["project_slug"])
+			if body.ProjectSlug != "demo-project" {
+				t.Fatalf("unexpected status project slug: %v", body.ProjectSlug)
 			}
-			if body["machine_id"] == "" {
+			if body.MachineID == "" {
 				t.Fatalf("missing status machine_id")
 			}
-			if body["is_active"] != false {
-				t.Fatalf("unexpected active status: %v", body["is_active"])
+			if body.IsActive != false {
+				t.Fatalf("unexpected active status: %v", body.IsActive)
 			}
-			if body["error_message"] != "startup failed" {
-				t.Fatalf("unexpected error message: %v", body["error_message"])
+			if body.ErrorMessage != "startup failed" {
+				t.Fatalf("unexpected error message: %v", body.ErrorMessage)
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"message":   "status_updated",
-				"slug":      "demo",
-				"is_active": false,
+			_ = json.NewEncoder(w).Encode(struct {
+				Message  string `json:"message"`
+				Slug     string `json:"slug"`
+				IsActive bool   `json:"is_active"`
+			}{
+				Message:  "status_updated",
+				Slug:     "demo",
+				IsActive: false,
 			})
 		default:
 			http.NotFound(w, r)
@@ -365,9 +371,9 @@ func TestMarketplaceConfigureAndStatus(t *testing.T) {
 	defer srv.Close()
 
 	guard := newMarketplaceTestGuard(t, srv.URL)
-	if err := guard.ConfigureMarketplaceItem(context.Background(), "demo", map[string]any{
-		"mode":    "strict",
-		"retries": 3,
+	if err := guard.ConfigureMarketplaceItem(context.Background(), "demo", MarketplaceConfig{
+		"mode":    testRawJSON(`"strict"`),
+		"retries": testRawJSON(`3`),
 	}); err != nil {
 		t.Fatalf("configure marketplace item: %v", err)
 	}
@@ -380,9 +386,9 @@ func TestMarketplaceConfigureAndStatus(t *testing.T) {
 func TestMarketplaceErrorMapping(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"error":   "install_required",
-			"message": "install required",
+		_ = json.NewEncoder(w).Encode(testAPIErrorEnvelope{
+			Error:   "install_required",
+			Message: "install required",
 		})
 	}))
 	defer srv.Close()

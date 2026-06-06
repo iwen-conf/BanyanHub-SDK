@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -189,15 +190,25 @@ func (g *Guard) currentManagedVersion(slug string) string {
 	return g.managedVersions[slug]
 }
 
+type downloadMetaRequestBody struct {
+	LicenseKey    string `json:"license_key"`
+	MachineID     string `json:"machine_id"`
+	ProjectSlug   string `json:"project_slug"`
+	ComponentSlug string `json:"component_slug"`
+	Version       string `json:"version"`
+	OS            string `json:"os"`
+	Arch          string `json:"arch"`
+}
+
 func (g *Guard) requestDownloadMeta(component, version, os, arch string) (url, sha256, signature string, err error) {
-	reqBody := map[string]any{
-		"license_key":    g.cfg.LicenseKey,
-		"machine_id":     g.fingerprint.MachineID(),
-		"project_slug":   g.cfg.ProjectSlug,
-		"component_slug": component,
-		"version":        version,
-		"os":             os,
-		"arch":           arch,
+	reqBody := downloadMetaRequestBody{
+		LicenseKey:    g.cfg.LicenseKey,
+		MachineID:     g.fingerprint.MachineID(),
+		ProjectSlug:   g.cfg.ProjectSlug,
+		ComponentSlug: component,
+		Version:       version,
+		OS:            os,
+		Arch:          arch,
 	}
 
 	var resp struct {
@@ -210,8 +221,16 @@ func (g *Guard) requestDownloadMeta(component, version, os, arch string) (url, s
 	ctx, cancel := context.WithTimeout(context.Background(), g.otaDownloadTimeout())
 	defer cancel()
 
-	if err := g.postJSON(ctx, "/api/v1/update/download", reqBody, &resp); err != nil {
+	reqBodyJSON, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", "", "", fmt.Errorf("marshal request: %w", err)
+	}
+	raw, err := g.postJSON(ctx, "/api/v1/update/download", reqBodyJSON)
+	if err != nil {
 		return "", "", "", err
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return "", "", "", fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
 
 	if resp.Error != "" {

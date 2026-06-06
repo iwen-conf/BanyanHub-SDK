@@ -2,6 +2,7 @@ package sdk
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -35,6 +36,20 @@ const (
 
 // SubmitFeedbackRequest is the payload for submitting new feedback.
 type SubmitFeedbackRequest struct {
+	UserID      string               `json:"user_id"`
+	UserName    string               `json:"user_name"`
+	UserEmail   string               `json:"user_email,omitempty"`
+	Category    FeedbackCategory     `json:"category"`
+	Title       string               `json:"title"`
+	Content     string               `json:"content"`
+	AppVersion  string               `json:"app_version,omitempty"`
+	Attachments []FeedbackAttachment `json:"attachments,omitempty"`
+}
+
+type submitFeedbackBody struct {
+	LicenseKey  string               `json:"license_key"`
+	MachineID   string               `json:"machine_id"`
+	ProjectSlug string               `json:"project_slug"`
 	UserID      string               `json:"user_id"`
 	UserName    string               `json:"user_name"`
 	UserEmail   string               `json:"user_email,omitempty"`
@@ -111,6 +126,12 @@ type UploadURLResponse struct {
 	FileKey   string `json:"file_key"`
 }
 
+type prepareFeedbackUploadBody struct {
+	LicenseKey  string `json:"license_key"`
+	ProjectSlug string `json:"project_slug"`
+	FileName    string `json:"file_name"`
+}
+
 // ReleaseNoteEntry represents a single version's release notes.
 type ReleaseNoteEntry struct {
 	ComponentSlug     string             `json:"component_slug,omitempty"`
@@ -138,29 +159,31 @@ type ReleaseNotesResponse struct {
 
 // SubmitFeedback submits a new feedback item to BanyanHub.
 func (g *Guard) SubmitFeedback(ctx context.Context, req SubmitFeedbackRequest) (*FeedbackItem, error) {
-	body := map[string]any{
-		"license_key":  g.cfg.LicenseKey,
-		"machine_id":   g.fingerprint.MachineID(),
-		"project_slug": g.cfg.ProjectSlug,
-		"user_id":      req.UserID,
-		"user_name":    req.UserName,
-		"category":     req.Category,
-		"title":        req.Title,
-		"content":      req.Content,
-	}
-	if req.UserEmail != "" {
-		body["user_email"] = req.UserEmail
-	}
-	if req.AppVersion != "" {
-		body["app_version"] = req.AppVersion
-	}
-	if len(req.Attachments) > 0 {
-		body["attachments"] = req.Attachments
+	body := submitFeedbackBody{
+		LicenseKey:  g.cfg.LicenseKey,
+		MachineID:   g.fingerprint.MachineID(),
+		ProjectSlug: g.cfg.ProjectSlug,
+		UserID:      req.UserID,
+		UserName:    req.UserName,
+		UserEmail:   req.UserEmail,
+		Category:    req.Category,
+		Title:       req.Title,
+		Content:     req.Content,
+		AppVersion:  req.AppVersion,
+		Attachments: req.Attachments,
 	}
 
 	var item FeedbackItem
-	if err := g.postJSON(ctx, "/api/v1/feedbacks", body, &item); err != nil {
+	bodyJSON, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	raw, err := g.postJSON(ctx, "/api/v1/feedbacks", bodyJSON)
+	if err != nil {
 		return nil, fmt.Errorf("submit feedback: %w", err)
+	}
+	if err := json.Unmarshal(raw, &item); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
 	return &item, nil
 }
@@ -175,8 +198,12 @@ func (g *Guard) ListMyFeedback(ctx context.Context, userID string, page, pageSiz
 	query.Set("page_size", strconv.Itoa(pageSize))
 
 	var resp FeedbackListResponse
-	if err := g.getJSON(ctx, "/api/v1/feedbacks", query, &resp); err != nil {
+	raw, err := g.getJSON(ctx, "/api/v1/feedbacks", query)
+	if err != nil {
 		return nil, fmt.Errorf("list feedback: %w", err)
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
 	return &resp, nil
 }
@@ -238,7 +265,11 @@ func (g *Guard) UploadFeedbackFile(ctx context.Context, fileName string, content
 	}
 
 	var result UploadURLResponse
-	if err := decodeAPIJSONResponse(resp, &result); err != nil {
+	raw, err := readAPIJSONResponse(resp)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
 	if result.FileKey == "" {
@@ -251,15 +282,23 @@ func (g *Guard) UploadFeedbackFile(ctx context.Context, fileName string, content
 }
 
 func (g *Guard) prepareFeedbackUpload(ctx context.Context, fileName string) (*UploadURLResponse, error) {
-	body := map[string]any{
-		"license_key":  g.cfg.LicenseKey,
-		"project_slug": g.cfg.ProjectSlug,
-		"file_name":    fileName,
+	body := prepareFeedbackUploadBody{
+		LicenseKey:  g.cfg.LicenseKey,
+		ProjectSlug: g.cfg.ProjectSlug,
+		FileName:    fileName,
 	}
 
 	var resp UploadURLResponse
-	if err := g.postJSON(ctx, "/api/v1/feedbacks/upload-url", body, &resp); err != nil {
+	bodyJSON, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	raw, err := g.postJSON(ctx, "/api/v1/feedbacks/upload-url", bodyJSON)
+	if err != nil {
 		return nil, fmt.Errorf("prepare feedback upload: %w", err)
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
 	if resp.UploadURL == "" {
 		resp.UploadURL = "/api/v1/feedbacks/upload"
@@ -281,8 +320,12 @@ func (g *Guard) FetchReleaseNotes(ctx context.Context) (*ReleaseNotesResponse, e
 	query.Set("project_slug", g.cfg.ProjectSlug)
 
 	var wire releaseNotesWireResponse
-	if err := g.getJSON(ctx, "/api/v1/feedbacks/release-notes", query, &wire); err != nil {
+	raw, err := g.getJSON(ctx, "/api/v1/feedbacks/release-notes", query)
+	if err != nil {
 		return nil, fmt.Errorf("fetch release notes: %w", err)
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
 	return wire.toSDKResponse(), nil
 }

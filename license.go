@@ -1,6 +1,7 @@
 package sdk
 
 import (
+	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -13,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"slices"
 	"time"
 
 	"golang.org/x/crypto/hkdf"
@@ -46,6 +46,20 @@ type verifyResponse struct {
 	Message        string          `json:"message"`
 }
 
+type licenseVerifyRequestBody struct {
+	LicenseKey    string            `json:"license_key"`
+	MachineID     string            `json:"machine_id"`
+	AuxSignals    map[string]string `json:"aux_signals"`
+	ProjectSlug   string            `json:"project_slug"`
+	ComponentSlug string            `json:"component_slug"`
+	Hostname      string            `json:"hostname"`
+	OS            string            `json:"os"`
+	Arch          string            `json:"arch"`
+	Nonce         string            `json:"nonce"`
+	Timestamp     int64             `json:"timestamp"`
+	BinaryHash    string            `json:"binary_hash"`
+}
+
 func (g *Guard) verifyLicense(ctx context.Context) error {
 	now := time.Now()
 	if err := g.validatePersistedLease(now); err == nil {
@@ -75,30 +89,38 @@ func (g *Guard) verifyOnline(parent context.Context, now time.Time) (*lease, str
 		return nil, "", err
 	}
 
-	reqBody := map[string]any{
-		"license_key":    g.cfg.LicenseKey,
-		"machine_id":     g.fingerprint.MachineID(),
-		"aux_signals":    g.fingerprint.AuxSignals(),
-		"project_slug":   g.cfg.ProjectSlug,
-		"component_slug": g.cfg.ComponentSlug,
-		"hostname":       hostname(),
-		"os":             g.fingerprint.auxSignals["os"],
-		"arch":           g.fingerprint.auxSignals["arch"],
-		"nonce":          nonce,
-		"timestamp":      now.Unix(),
-		"binary_hash":    binaryHash,
+	reqBody := licenseVerifyRequestBody{
+		LicenseKey:    g.cfg.LicenseKey,
+		MachineID:     g.fingerprint.MachineID(),
+		AuxSignals:    g.fingerprint.AuxSignals(),
+		ProjectSlug:   g.cfg.ProjectSlug,
+		ComponentSlug: g.cfg.ComponentSlug,
+		Hostname:      hostname(),
+		OS:            g.fingerprint.auxSignals["os"],
+		Arch:          g.fingerprint.auxSignals["arch"],
+		Nonce:         nonce,
+		Timestamp:     now.Unix(),
+		BinaryHash:    binaryHash,
 	}
 
 	var resp verifyResponse
 	ctx, cancel := context.WithTimeout(parent, verifyTimeout)
 	defer cancel()
 
-	if err := g.postJSON(ctx, "/api/v1/verify", reqBody, &resp); err != nil {
+	reqBodyJSON, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, "", fmt.Errorf("marshal request: %w", err)
+	}
+	raw, err := g.postJSON(ctx, "/api/v1/verify", reqBodyJSON)
+	if err != nil {
 		var apiErr *APIError
 		if errors.As(err, &apiErr) {
 			return nil, "", err
 		}
 		return nil, "", fmt.Errorf("%w: %v", ErrNetworkError, err)
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, "", fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
 	if resp.Error != "" {
 		return nil, "", mapVerifyError(resp.Error)
@@ -248,25 +270,29 @@ func verifyEd25519Digest(canonical []byte, signature string, publicKeys []ed2551
 }
 
 func canonicalJSON(raw json.RawMessage) ([]byte, error) {
-	var value any
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return nil, err
+	if !json.Valid(raw) {
+		return nil, fmt.Errorf("invalid json")
 	}
-	normalized, err := marshalCanonical(value)
-	if err != nil {
-		return nil, err
-	}
-	return normalized, nil
+	return marshalCanonicalRaw(bytes.TrimSpace(raw))
 }
 
-func marshalCanonical(v any) ([]byte, error) {
-	switch value := v.(type) {
-	case map[string]any:
-		keys := make([]string, 0, len(value))
-		for key := range value {
+func marshalCanonicalRaw(raw json.RawMessage) ([]byte, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return nil, fmt.Errorf("empty json")
+	}
+
+	switch trimmed[0] {
+	case '{':
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(trimmed, &object); err != nil {
+			return nil, err
+		}
+		keys := make([]string, 0, len(object))
+		for key := range object {
 			keys = append(keys, key)
 		}
-		slices.Sort(keys)
+		sortStrings(keys)
 		buf := make([]byte, 0, 256)
 		buf = append(buf, '{')
 		for i, key := range keys {
@@ -276,7 +302,7 @@ func marshalCanonical(v any) ([]byte, error) {
 			keyJSON, _ := json.Marshal(key)
 			buf = append(buf, keyJSON...)
 			buf = append(buf, ':')
-			child, err := marshalCanonical(value[key])
+			child, err := marshalCanonicalRaw(object[key])
 			if err != nil {
 				return nil, err
 			}
@@ -284,14 +310,18 @@ func marshalCanonical(v any) ([]byte, error) {
 		}
 		buf = append(buf, '}')
 		return buf, nil
-	case []any:
+	case '[':
+		var items []json.RawMessage
+		if err := json.Unmarshal(trimmed, &items); err != nil {
+			return nil, err
+		}
 		buf := make([]byte, 0, 128)
 		buf = append(buf, '[')
-		for i, item := range value {
+		for i, item := range items {
 			if i > 0 {
 				buf = append(buf, ',')
 			}
-			child, err := marshalCanonical(item)
+			child, err := marshalCanonicalRaw(item)
 			if err != nil {
 				return nil, err
 			}
@@ -300,7 +330,23 @@ func marshalCanonical(v any) ([]byte, error) {
 		buf = append(buf, ']')
 		return buf, nil
 	default:
-		return json.Marshal(value)
+		var compacted bytes.Buffer
+		if err := json.Compact(&compacted, trimmed); err != nil {
+			return nil, err
+		}
+		return compacted.Bytes(), nil
+	}
+}
+
+func sortStrings(values []string) {
+	for i := 1; i < len(values); i++ {
+		current := values[i]
+		j := i - 1
+		for j >= 0 && values[j] > current {
+			values[j+1] = values[j]
+			j--
+		}
+		values[j+1] = current
 	}
 }
 

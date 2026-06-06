@@ -263,13 +263,12 @@ func (g *Guard) AutoResolveVersion() error {
 		return fmt.Errorf("calculate binary hash: %w", err)
 	}
 
-	// Request version from server
-	reqBody := map[string]any{
-		"license_key":  g.cfg.LicenseKey,
-		"machine_id":   g.fingerprint.MachineID(),
-		"project_slug": g.cfg.ProjectSlug,
-		"component":    g.cfg.ComponentSlug,
-		"binary_hash":  binaryHash,
+	reqBody := versionResolveRequest{
+		LicenseKey:  g.cfg.LicenseKey,
+		MachineID:   g.fingerprint.MachineID(),
+		ProjectSlug: g.cfg.ProjectSlug,
+		Component:   g.cfg.ComponentSlug,
+		BinaryHash:  binaryHash,
 	}
 
 	var resp struct {
@@ -282,8 +281,16 @@ func (g *Guard) AutoResolveVersion() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := g.postJSON(ctx, "/api/v1/version/resolve", reqBody, &resp); err != nil {
+	reqBodyJSON, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("marshal request: %w", err)
+	}
+	raw, err := g.postJSON(ctx, "/api/v1/version/resolve", reqBodyJSON)
+	if err != nil {
 		return fmt.Errorf("request version resolution: %w", err)
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
 
 	if resp.Error != "" {
@@ -347,40 +354,43 @@ func (g *Guard) verificationKeys() []ed25519.PublicKey {
 	return nil
 }
 
-// postJSON sends a JSON POST request to the server and decodes the response.
-func (g *Guard) postJSON(ctx context.Context, path string, body any, result any) error {
-	data, err := json.Marshal(body)
-	if err != nil {
-		return fmt.Errorf("marshal request: %w", err)
-	}
+type versionResolveRequest struct {
+	LicenseKey  string `json:"license_key"`
+	MachineID   string `json:"machine_id"`
+	ProjectSlug string `json:"project_slug"`
+	Component   string `json:"component"`
+	BinaryHash  string `json:"binary_hash"`
+}
 
+// postJSON sends a bounded JSON POST request and returns the raw response body.
+func (g *Guard) postJSON(ctx context.Context, path string, data []byte) ([]byte, error) {
 	url := serverURLForPath(g.cfg.ServerURL, path)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "BanyanHub-SDK/"+Version)
 
 	resp, err := g.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("send request: %w", err)
+		return nil, fmt.Errorf("send request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return decodeAPIErrorResponse(resp)
+		return nil, decodeAPIErrorResponse(resp)
 	}
 
-	if err := decodeAPIJSONResponse(resp, result); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
+	raw, err := readAPIJSONResponse(resp)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
-
-	return nil
+	return raw, nil
 }
 
-// getJSON sends a JSON GET request to the server and decodes the response.
-func (g *Guard) getJSON(ctx context.Context, path string, query url.Values, result any) error {
+// getJSON sends a bounded JSON GET request and returns the raw response body.
+func (g *Guard) getJSON(ctx context.Context, path string, query url.Values) ([]byte, error) {
 	fullURL := serverURLForPath(g.cfg.ServerURL, path)
 	if len(query) > 0 {
 		fullURL += "?" + query.Encode()
@@ -388,25 +398,25 @@ func (g *Guard) getJSON(ctx context.Context, path string, query url.Values, resu
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("User-Agent", "BanyanHub-SDK/"+Version)
 
 	resp, err := g.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("send request: %w", err)
+		return nil, fmt.Errorf("send request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return decodeAPIErrorResponse(resp)
+		return nil, decodeAPIErrorResponse(resp)
 	}
 
-	if err := decodeAPIJSONResponse(resp, result); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
+	raw, err := readAPIJSONResponse(resp)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
-
-	return nil
+	return raw, nil
 }
 
 func randomNonce() (string, error) {

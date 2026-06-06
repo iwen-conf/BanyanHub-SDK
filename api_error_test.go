@@ -20,6 +20,26 @@ func (failingAPIErrorBody) Read(_ []byte) (int, error) {
 	return 0, errors.New("forced body read failure")
 }
 
+type testAPIErrorEnvelope struct {
+	Error   string `json:"error,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+	Message string `json:"message,omitempty"`
+	Max     int    `json:"max,omitempty"`
+}
+
+type testUploadFileResponse struct {
+	FileKey   string `json:"file_key"`
+	SizeBytes int    `json:"size_bytes"`
+}
+
+func testString(value string) *string {
+	return &value
+}
+
+func testRawJSON(value string) json.RawMessage {
+	return json.RawMessage(value)
+}
+
 func TestAPIErrorMappingPreservesStructuredDetails(t *testing.T) {
 	err := (&APIError{
 		StatusCode: http.StatusForbidden,
@@ -51,9 +71,9 @@ func TestPostJSONDecodesAPIErrorEnvelope(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"error":   "update_frozen",
-			"message": "Update channel is frozen.",
+		_ = json.NewEncoder(w).Encode(testAPIErrorEnvelope{
+			Error:   "update_frozen",
+			Message: "Update channel is frozen.",
 		})
 	}))
 	defer srv.Close()
@@ -69,7 +89,11 @@ func TestPostJSONDecodesAPIErrorEnvelope(t *testing.T) {
 		t.Fatalf("new guard: %v", err)
 	}
 
-	err = g.postJSON(context.Background(), "/api/v1/update/download", map[string]string{"x": "y"}, &struct{}{})
+	bodyJSON, err := json.Marshal(map[string]string{"x": "y"})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	_, err = g.postJSON(context.Background(), "/api/v1/update/download", bodyJSON)
 	if err == nil {
 		t.Fatal("expected API error")
 	}
@@ -91,9 +115,9 @@ func TestGetJSONDecodesReasonWhenErrorFieldMissing(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"reason":  "machine_banned",
-			"message": "Machine is banned.",
+		_ = json.NewEncoder(w).Encode(testAPIErrorEnvelope{
+			Reason:  "machine_banned",
+			Message: "Machine is banned.",
 		})
 	}))
 	defer srv.Close()
@@ -109,7 +133,7 @@ func TestGetJSONDecodesReasonWhenErrorFieldMissing(t *testing.T) {
 		t.Fatalf("new guard: %v", err)
 	}
 
-	err = g.getJSON(context.Background(), "/api/v1/plugins/catalog", nil, &struct{}{})
+	_, err = g.getJSON(context.Background(), "/api/v1/plugins/catalog", nil)
 	if err == nil {
 		t.Fatal("expected API error")
 	}
@@ -130,9 +154,9 @@ func TestVerifyOnlinePreservesBusinessAPIError(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"error": "max_machines_exceeded",
-			"max":   1,
+		_ = json.NewEncoder(w).Encode(testAPIErrorEnvelope{
+			Error: "max_machines_exceeded",
+			Max:   1,
 		})
 	}))
 	defer srv.Close()
@@ -200,7 +224,7 @@ func TestDecodeAPIErrorResponseLimitsBodySize(t *testing.T) {
 		t.Fatalf("new guard: %v", err)
 	}
 
-	err = g.getJSON(context.Background(), "/api/v1/plugins/catalog", nil, &struct{}{})
+	_, err = g.getJSON(context.Background(), "/api/v1/plugins/catalog", nil)
 	if err == nil {
 		t.Fatal("expected API error")
 	}
@@ -264,8 +288,11 @@ func TestPostJSONLimitsSuccessfulResponseBody(t *testing.T) {
 		t.Fatalf("new guard: %v", err)
 	}
 
-	var result map[string]string
-	err = g.postJSON(context.Background(), "/api/v1/heartbeat", map[string]string{"x": "y"}, &result)
+	bodyJSON, err := json.Marshal(map[string]string{"x": "y"})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	_, err = g.postJSON(context.Background(), "/api/v1/heartbeat", bodyJSON)
 	if err == nil {
 		t.Fatal("expected oversized response error")
 	}

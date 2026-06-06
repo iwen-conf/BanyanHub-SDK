@@ -41,12 +41,12 @@ func TestHeartbeat_UnsignedResponseForcesFailure(t *testing.T) {
 	guard.sm.OnVerifySuccess()
 
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"status":          "ok",
-			"lease":           json.RawMessage(leaseJSON),
-			"lease_signature": sig,
-			"nonce":           "wrong",
-			"server_time":     time.Now().UTC().Format(time.RFC3339),
+		_ = json.NewEncoder(w).Encode(heartbeatResponse{
+			Status:         "ok",
+			Lease:          json.RawMessage(leaseJSON),
+			LeaseSignature: sig,
+			Nonce:          "wrong",
+			ServerTime:     time.Now().UTC().Format(time.RFC3339),
 		})
 	}))
 	defer server.Close()

@@ -86,9 +86,9 @@ func TestUploadFeedbackFile_UsesPreparedFileKey(t *testing.T) {
 				t.Fatalf("unexpected upload payload: %s", string(got))
 			}
 
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"file_key":   fileKey,
-				"size_bytes": len(payload),
+			_ = json.NewEncoder(w).Encode(testUploadFileResponse{
+				FileKey:   fileKey,
+				SizeBytes: len(payload),
 			})
 		default:
 			http.NotFound(w, r)
@@ -199,12 +199,12 @@ func TestListMyFeedback_SendsProjectSlug(t *testing.T) {
 			t.Fatalf("unexpected page_size: %s", got)
 		}
 
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data": []map[string]any{},
-			"pagination": map[string]any{
-				"total":     0,
-				"page":      2,
-				"page_size": 25,
+		_ = json.NewEncoder(w).Encode(FeedbackListResponse{
+			Feedbacks: []FeedbackItem{},
+			Pagination: FeedbackListPagination{
+				Total:    0,
+				Page:     2,
+				PageSize: 25,
 			},
 		})
 	}))
@@ -233,17 +233,17 @@ func TestFetchReleaseNotes_WorkerReleasesShape(t *testing.T) {
 			t.Fatalf("unexpected license key query: %s", got)
 		}
 
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"releases": []map[string]any{
+		_ = json.NewEncoder(w).Encode(releaseNotesWireResponse{
+			Releases: []releaseNotesWireItem{
 				{
-					"component_slug": "backend",
-					"version":        "1.2.3",
-					"release_notes":  "Fixed startup crash",
-					"feedbacks": []map[string]any{
+					ComponentSlug: "backend",
+					Version:       "1.2.3",
+					ReleaseNotes:  testString("Fixed startup crash"),
+					Feedbacks: []ResolvedFeedback{
 						{
-							"id":       "fb-1",
-							"title":    "Startup crash",
-							"category": "bug",
+							ID:       "fb-1",
+							Title:    "Startup crash",
+							Category: FeedbackBug,
 						},
 					},
 				},
@@ -278,11 +278,11 @@ func TestFetchReleaseNotes_LegacyEntriesShape(t *testing.T) {
 		if got := r.URL.Query().Get("license_key"); got != "LIC-FEEDBACK-001" {
 			t.Fatalf("unexpected license key query: %s", got)
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"entries": []map[string]any{
+		_ = json.NewEncoder(w).Encode(ReleaseNotesResponse{
+			Entries: []ReleaseNoteEntry{
 				{
-					"version":       "1.0.0",
-					"release_notes": "Initial release",
+					Version:      "1.0.0",
+					ReleaseNotes: "Initial release",
 				},
 			},
 		})

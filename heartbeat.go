@@ -1,6 +1,7 @@
 package sdk
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -31,6 +32,31 @@ type updateInfo struct {
 	UpdateAvailable bool   `json:"update_available"`
 	Mandatory       bool   `json:"mandatory"`
 	ReleaseNotes    string `json:"release_notes"`
+}
+
+type heartbeatComponent struct {
+	Slug    string `json:"slug"`
+	Version string `json:"version"`
+}
+
+type heartbeatRequestBody struct {
+	LicenseKey    string               `json:"license_key"`
+	MachineID     string               `json:"machine_id"`
+	ProjectSlug   string               `json:"project_slug"`
+	ComponentSlug string               `json:"component_slug"`
+	Components    []heartbeatComponent `json:"components"`
+	Nonce         string               `json:"nonce"`
+	Timestamp     int64                `json:"timestamp"`
+	BinaryHash    string               `json:"binary_hash"`
+}
+
+type heartbeatSignaturePayload struct {
+	Lease          json.RawMessage `json:"lease"`
+	LeaseSignature string          `json:"lease_signature"`
+	Nonce          string          `json:"nonce"`
+	ServerTime     string          `json:"server_time"`
+	Status         string          `json:"status"`
+	UpdatesDigest  string          `json:"updates_digest"`
 }
 
 func (g *Guard) startHeartbeat(ctx context.Context, done chan struct{}) {
@@ -107,16 +133,16 @@ func (g *Guard) sendHeartbeat(parent context.Context) error {
 	}
 	g.mu.RUnlock()
 
-	components := []map[string]string{
+	components := []heartbeatComponent{
 		{
-			"slug":    g.cfg.ComponentSlug,
-			"version": currentVersion,
+			Slug:    g.cfg.ComponentSlug,
+			Version: currentVersion,
 		},
 	}
 	for _, mc := range g.cfg.ManagedComponents {
-		components = append(components, map[string]string{
-			"slug":    mc.Slug,
-			"version": managedVersionsSnapshot[mc.Slug],
+		components = append(components, heartbeatComponent{
+			Slug:    mc.Slug,
+			Version: managedVersionsSnapshot[mc.Slug],
 		})
 	}
 
@@ -128,21 +154,26 @@ func (g *Guard) sendHeartbeat(parent context.Context) error {
 	if err != nil {
 		return err
 	}
-	reqBody := map[string]any{
-		"license_key":    g.cfg.LicenseKey,
-		"machine_id":     g.fingerprint.MachineID(),
-		"project_slug":   g.cfg.ProjectSlug,
-		"component_slug": g.cfg.ComponentSlug,
-		"components":     components,
-		"nonce":          nonce,
-		"timestamp":      nowUnix(),
-		"binary_hash":    binaryHash,
+	reqBody := heartbeatRequestBody{
+		LicenseKey:    g.cfg.LicenseKey,
+		MachineID:     g.fingerprint.MachineID(),
+		ProjectSlug:   g.cfg.ProjectSlug,
+		ComponentSlug: g.cfg.ComponentSlug,
+		Components:    components,
+		Nonce:         nonce,
+		Timestamp:     nowUnix(),
+		BinaryHash:    binaryHash,
 	}
 
 	var resp heartbeatResponse
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
-	if err := g.postJSON(ctx, "/api/v1/heartbeat", reqBody, &resp); err != nil {
+	reqBodyJSON, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("marshal request: %w", err)
+	}
+	raw, err := g.postJSON(ctx, "/api/v1/heartbeat", reqBodyJSON)
+	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -151,6 +182,9 @@ func (g *Guard) sendHeartbeat(parent context.Context) error {
 			return err
 		}
 		return fmt.Errorf("%w: %v", ErrNetworkError, err)
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
 
 	if err := g.verifyHeartbeatResponse(resp, nonce); err != nil {
@@ -187,13 +221,13 @@ func (g *Guard) verifyHeartbeatResponse(resp heartbeatResponse, requestNonce str
 		return ErrHeartbeatNonceMismatch
 	}
 
-	payload := map[string]any{
-		"lease":           mustJSONObject(resp.Lease),
-		"lease_signature": resp.LeaseSignature,
-		"nonce":           resp.Nonce,
-		"server_time":     resp.ServerTime,
-		"status":          resp.Status,
-		"updates_digest":  updatesDigest(resp.Updates),
+	payload := heartbeatSignaturePayload{
+		Lease:          normalizedJSONObject(resp.Lease),
+		LeaseSignature: resp.LeaseSignature,
+		Nonce:          resp.Nonce,
+		ServerTime:     resp.ServerTime,
+		Status:         resp.Status,
+		UpdatesDigest:  updatesDigest(resp.Updates),
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -209,15 +243,12 @@ func (g *Guard) verifyHeartbeatResponse(resp heartbeatResponse, requestNonce str
 	return nil
 }
 
-func mustJSONObject(raw json.RawMessage) any {
-	if len(raw) == 0 {
-		return map[string]any{}
+func normalizedJSONObject(raw json.RawMessage) json.RawMessage {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || !json.Valid(trimmed) || trimmed[0] != '{' {
+		return json.RawMessage("{}")
 	}
-	var value any
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return map[string]any{}
-	}
-	return value
+	return trimmed
 }
 
 func updatesDigest(updates []updateInfo) string {

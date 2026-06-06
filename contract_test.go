@@ -11,11 +11,11 @@ import (
 )
 
 type heartbeatVectorCase struct {
-	Updates       []updateInfo           `json:"updates"`
-	UpdatesDigest string                 `json:"updates_digest"`
-	Payload       map[string]interface{} `json:"payload"`
-	Canonical     string                 `json:"canonical"`
-	Signature     string                 `json:"signature"`
+	Updates       []updateInfo    `json:"updates"`
+	UpdatesDigest string          `json:"updates_digest"`
+	Payload       json.RawMessage `json:"payload"`
+	Canonical     string          `json:"canonical"`
+	Signature     string          `json:"signature"`
 }
 
 type vector struct {
@@ -24,9 +24,9 @@ type vector struct {
 		PrivatePKCS8 string `json:"private_pkcs8"`
 	} `json:"keys"`
 	Lease struct {
-		Payload   map[string]interface{} `json:"payload"`
-		Canonical string                 `json:"canonical"`
-		Signature string                 `json:"signature"`
+		Payload   json.RawMessage `json:"payload"`
+		Canonical string          `json:"canonical"`
+		Signature string          `json:"signature"`
 	} `json:"lease"`
 	Heartbeat struct {
 		EmptyUpdates    heartbeatVectorCase `json:"empty_updates"`
@@ -46,8 +46,7 @@ func TestV3ContractParity(t *testing.T) {
 	}
 
 	t.Run("Lease Canonicalization", func(t *testing.T) {
-		raw, _ := json.Marshal(v.Lease.Payload)
-		canonical, err := canonicalJSON(raw)
+		canonical, err := canonicalJSON(v.Lease.Payload)
 		if err != nil {
 			t.Fatalf("canonicalJSON failed: %v", err)
 		}
@@ -75,8 +74,7 @@ func TestV3ContractParity(t *testing.T) {
 	})
 
 	t.Run("Heartbeat Canonicalization Empty Updates", func(t *testing.T) {
-		raw, _ := json.Marshal(v.Heartbeat.EmptyUpdates.Payload)
-		canonical, err := canonicalJSON(raw)
+		canonical, err := canonicalJSON(v.Heartbeat.EmptyUpdates.Payload)
 		if err != nil {
 			t.Fatalf("canonicalJSON failed: %v", err)
 		}

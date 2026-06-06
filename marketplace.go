@@ -19,6 +19,9 @@ type MarketplaceItemStats struct {
 	InstallCount int     `json:"install_count"`
 }
 
+type MarketplaceJSON map[string]json.RawMessage
+type MarketplaceConfig MarketplaceJSON
+
 type MarketplaceItem struct {
 	ID               string               `json:"id"`
 	Slug             string               `json:"slug"`
@@ -38,13 +41,13 @@ type MarketplaceItem struct {
 	ScreenshotURLs   []string             `json:"screenshot_urls"`
 	Target           *string              `json:"target"`
 	Scope            *string              `json:"scope"`
-	Manifest         map[string]any       `json:"manifest"`
+	Manifest         MarketplaceJSON      `json:"manifest"`
 	OS               []string             `json:"os"`
 	Arch             []string             `json:"arch"`
 	SDKVersionReq    *string              `json:"sdk_version_req"`
 	Permissions      []string             `json:"permissions"`
 	Dependencies     map[string]string    `json:"dependencies"`
-	ConfigSchema     map[string]any       `json:"config_schema"`
+	ConfigSchema     MarketplaceJSON      `json:"config_schema"`
 	Status           string               `json:"status"`
 	CreatedAt        string               `json:"created_at"`
 	UpdatedAt        string               `json:"updated_at"`
@@ -119,6 +122,32 @@ type MarketplaceBrowseOptions struct {
 	PageSize int
 }
 
+type marketplaceAccessBody struct {
+	LicenseKey  string `json:"license_key"`
+	MachineID   string `json:"machine_id"`
+	ProjectSlug string `json:"project_slug"`
+	OS          string `json:"os"`
+	Arch        string `json:"arch"`
+}
+
+type marketplaceConfigureBody struct {
+	marketplaceAccessBody
+	Config MarketplaceConfig `json:"config"`
+}
+
+type marketplaceStatusBody struct {
+	marketplaceAccessBody
+	IsActive     bool   `json:"is_active"`
+	ErrorMessage string `json:"error_message,omitempty"`
+}
+
+type marketplaceReviewBody struct {
+	marketplaceAccessBody
+	Score   int    `json:"score"`
+	Title   string `json:"title,omitempty"`
+	Content string `json:"content,omitempty"`
+}
+
 type MarketplaceAPIError = APIError
 
 // IsMarketplaceError reports whether err contains MarketplaceAPIError.
@@ -134,57 +163,50 @@ func IsMarketplaceError(err error, code string) bool {
 	return marketplaceErr.Code == code
 }
 
-func (g *Guard) marketplaceAccessBody() map[string]any {
-	return map[string]any{
-		"license_key":  g.cfg.LicenseKey,
-		"machine_id":   g.fingerprint.MachineID(),
-		"project_slug": g.cfg.ProjectSlug,
-		"os":           g.cfg.OTA.OS,
-		"arch":         g.cfg.OTA.Arch,
+func (g *Guard) marketplaceAccessBody() marketplaceAccessBody {
+	return marketplaceAccessBody{
+		LicenseKey:  g.cfg.LicenseKey,
+		MachineID:   g.fingerprint.MachineID(),
+		ProjectSlug: g.cfg.ProjectSlug,
+		OS:          g.cfg.OTA.OS,
+		Arch:        g.cfg.OTA.Arch,
 	}
 }
 
-func (g *Guard) marketplaceRequest(ctx context.Context, method, path string, query url.Values, body any, result any) error {
+func (g *Guard) marketplaceRequest(ctx context.Context, method, path string, query url.Values, data []byte) ([]byte, error) {
 	fullURL := serverURLForPath(g.cfg.ServerURL, path)
 	if len(query) > 0 {
 		fullURL += "?" + query.Encode()
 	}
 
 	var payload io.Reader
-	if body != nil {
-		data, err := json.Marshal(body)
-		if err != nil {
-			return fmt.Errorf("marshal request: %w", err)
-		}
+	if data != nil {
 		payload = bytes.NewReader(data)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, fullURL, payload)
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("User-Agent", "BanyanHub-SDK/"+Version)
-	if body != nil {
+	if data != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
 	resp, err := g.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrNetworkError, err)
+		return nil, fmt.Errorf("%w: %v", ErrNetworkError, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return decodeAPIErrorResponse(resp)
+		return nil, decodeAPIErrorResponse(resp)
 	}
-	if result == nil {
-		return nil
+	raw, err := readAPIJSONResponse(resp)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
-
-	if err := decodeAPIJSONResponse(resp, result); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
-	}
-	return nil
+	return raw, nil
 }
 
 func (g *Guard) GetMarketplaceCatalog(ctx context.Context, options MarketplaceBrowseOptions) (*MarketplaceCatalog, error) {
@@ -229,8 +251,12 @@ func (g *Guard) GetMarketplaceCatalog(ctx context.Context, options MarketplaceBr
 	query.Set("page_size", strconv.Itoa(pageSize))
 
 	var resp MarketplaceCatalog
-	if err := g.marketplaceRequest(ctx, http.MethodGet, "/api/v1/marketplace/browse", query, nil, &resp); err != nil {
+	raw, err := g.marketplaceRequest(ctx, http.MethodGet, "/api/v1/marketplace/browse", query, nil)
+	if err != nil {
 		return nil, fmt.Errorf("request marketplace catalog: %w", err)
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
 	return &resp, nil
 }
@@ -247,8 +273,12 @@ func (g *Guard) GetMarketplaceItem(ctx context.Context, slug string) (*Marketpla
 
 	var resp MarketplaceDetail
 	path := "/api/v1/marketplace/" + url.PathEscape(slug)
-	if err := g.marketplaceRequest(ctx, http.MethodGet, path, query, nil, &resp); err != nil {
+	raw, err := g.marketplaceRequest(ctx, http.MethodGet, path, query, nil)
+	if err != nil {
 		return nil, fmt.Errorf("request marketplace item: %w", err)
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
 	return &resp, nil
 }
@@ -270,8 +300,12 @@ func (g *Guard) GetMarketplaceReviews(ctx context.Context, slug string, page, pa
 
 	var resp MarketplaceReviewList
 	path := "/api/v1/marketplace/" + url.PathEscape(slug) + "/reviews"
-	if err := g.marketplaceRequest(ctx, http.MethodGet, path, query, nil, &resp); err != nil {
+	raw, err := g.marketplaceRequest(ctx, http.MethodGet, path, query, nil)
+	if err != nil {
 		return nil, fmt.Errorf("request marketplace reviews: %w", err)
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
 	return &resp, nil
 }
@@ -283,8 +317,16 @@ func (g *Guard) InstallMarketplaceItem(ctx context.Context, slug string) (*Marke
 
 	var resp MarketplaceInstallPackage
 	path := "/api/v1/marketplace/" + url.PathEscape(slug) + "/install"
-	if err := g.marketplaceRequest(ctx, http.MethodPost, path, nil, g.marketplaceAccessBody(), &resp); err != nil {
+	bodyJSON, err := json.Marshal(g.marketplaceAccessBody())
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	raw, err := g.marketplaceRequest(ctx, http.MethodPost, path, nil, bodyJSON)
+	if err != nil {
 		return nil, fmt.Errorf("install marketplace item: %w", err)
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
 	return &resp, nil
 }
@@ -295,25 +337,35 @@ func (g *Guard) UninstallMarketplaceItem(ctx context.Context, slug string) error
 	}
 
 	path := "/api/v1/marketplace/" + url.PathEscape(slug) + "/uninstall"
-	if err := g.marketplaceRequest(ctx, http.MethodPost, path, nil, g.marketplaceAccessBody(), nil); err != nil {
+	bodyJSON, err := json.Marshal(g.marketplaceAccessBody())
+	if err != nil {
+		return fmt.Errorf("marshal request: %w", err)
+	}
+	if _, err := g.marketplaceRequest(ctx, http.MethodPost, path, nil, bodyJSON); err != nil {
 		return fmt.Errorf("uninstall marketplace item: %w", err)
 	}
 	return nil
 }
 
-func (g *Guard) ConfigureMarketplaceItem(ctx context.Context, slug string, config map[string]any) error {
+func (g *Guard) ConfigureMarketplaceItem(ctx context.Context, slug string, config MarketplaceConfig) error {
 	if slug == "" {
 		return fmt.Errorf("marketplace slug is required")
 	}
 	if config == nil {
-		config = map[string]any{}
+		config = MarketplaceConfig{}
 	}
 
-	body := g.marketplaceAccessBody()
-	body["config"] = config
+	body := marketplaceConfigureBody{
+		marketplaceAccessBody: g.marketplaceAccessBody(),
+		Config:                config,
+	}
 
 	path := "/api/v1/marketplace/" + url.PathEscape(slug) + "/configure"
-	if err := g.marketplaceRequest(ctx, http.MethodPost, path, nil, body, nil); err != nil {
+	bodyJSON, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshal request: %w", err)
+	}
+	if _, err := g.marketplaceRequest(ctx, http.MethodPost, path, nil, bodyJSON); err != nil {
 		return fmt.Errorf("configure marketplace item: %w", err)
 	}
 	return nil
@@ -324,14 +376,20 @@ func (g *Guard) ReportMarketplaceStatus(ctx context.Context, slug string, isActi
 		return fmt.Errorf("marketplace slug is required")
 	}
 
-	body := g.marketplaceAccessBody()
-	body["is_active"] = isActive
+	body := marketplaceStatusBody{
+		marketplaceAccessBody: g.marketplaceAccessBody(),
+		IsActive:              isActive,
+	}
 	if strings.TrimSpace(errorMessage) != "" {
-		body["error_message"] = strings.TrimSpace(errorMessage)
+		body.ErrorMessage = strings.TrimSpace(errorMessage)
 	}
 
 	path := "/api/v1/marketplace/" + url.PathEscape(slug) + "/status"
-	if err := g.marketplaceRequest(ctx, http.MethodPost, path, nil, body, nil); err != nil {
+	bodyJSON, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshal request: %w", err)
+	}
+	if _, err := g.marketplaceRequest(ctx, http.MethodPost, path, nil, bodyJSON); err != nil {
 		return fmt.Errorf("report marketplace status: %w", err)
 	}
 	return nil
@@ -351,19 +409,29 @@ func (g *Guard) SubmitMarketplaceReview(
 		return nil, fmt.Errorf("score must be in range [1,5]")
 	}
 
-	body := g.marketplaceAccessBody()
-	body["score"] = score
+	body := marketplaceReviewBody{
+		marketplaceAccessBody: g.marketplaceAccessBody(),
+		Score:                 score,
+	}
 	if strings.TrimSpace(title) != "" {
-		body["title"] = strings.TrimSpace(title)
+		body.Title = strings.TrimSpace(title)
 	}
 	if strings.TrimSpace(content) != "" {
-		body["content"] = strings.TrimSpace(content)
+		body.Content = strings.TrimSpace(content)
 	}
 
 	var resp MarketplaceReviewSubmitResult
 	path := "/api/v1/marketplace/" + url.PathEscape(slug) + "/review"
-	if err := g.marketplaceRequest(ctx, http.MethodPost, path, nil, body, &resp); err != nil {
+	bodyJSON, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	raw, err := g.marketplaceRequest(ctx, http.MethodPost, path, nil, bodyJSON)
+	if err != nil {
 		return nil, fmt.Errorf("submit marketplace review: %w", err)
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidServerResponse, err)
 	}
 	return &resp, nil
 }

@@ -54,22 +54,22 @@ func TestGetPluginCatalog_Success(t *testing.T) {
 		if r.URL.Query().Get("license_key") == "" {
 			t.Fatalf("expected license_key query")
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"project_slug":  "myproj",
-			"machine_id":    "machine-1",
-			"source_os":     "linux",
-			"source_arch":   "amd64",
-			"update_frozen": false,
-			"plugins": []map[string]any{
+		_ = json.NewEncoder(w).Encode(PluginCatalog{
+			ProjectSlug:  "myproj",
+			MachineID:    "machine-1",
+			SourceOS:     "linux",
+			SourceArch:   "amd64",
+			UpdateFrozen: false,
+			Plugins: []PluginInfo{
 				{
-					"slug":              "admin-frontend",
-					"name":              "Admin Frontend",
-					"type":              "frontend",
-					"ota_enabled":       true,
-					"installed_version": "1.0.0",
-					"latest_version":    "1.1.0",
-					"update_available":  true,
-					"can_update":        true,
+					Slug:             "admin-frontend",
+					Name:             "Admin Frontend",
+					Type:             "frontend",
+					OTAEnabled:       true,
+					InstalledVersion: testString("1.0.0"),
+					LatestVersion:    testString("1.1.0"),
+					UpdateAvailable:  true,
+					CanUpdate:        true,
 				},
 			},
 		})
@@ -110,28 +110,28 @@ func TestCheckPluginUpdates_FiltersAvailableOnly(t *testing.T) {
 	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"project_slug":  "myproj",
-			"machine_id":    "machine-1",
-			"source_os":     "linux",
-			"source_arch":   "amd64",
-			"update_frozen": false,
-			"plugins": []map[string]any{
+		_ = json.NewEncoder(w).Encode(PluginCatalog{
+			ProjectSlug:  "myproj",
+			MachineID:    "machine-1",
+			SourceOS:     "linux",
+			SourceArch:   "amd64",
+			UpdateFrozen: false,
+			Plugins: []PluginInfo{
 				{
-					"slug":             "a",
-					"name":             "A",
-					"type":             "frontend",
-					"ota_enabled":      true,
-					"update_available": true,
-					"can_update":       true,
+					Slug:            "a",
+					Name:            "A",
+					Type:            "frontend",
+					OTAEnabled:      true,
+					UpdateAvailable: true,
+					CanUpdate:       true,
 				},
 				{
-					"slug":             "b",
-					"name":             "B",
-					"type":             "frontend",
-					"ota_enabled":      true,
-					"update_available": false,
-					"can_update":       false,
+					Slug:            "b",
+					Name:            "B",
+					Type:            "frontend",
+					OTAEnabled:      true,
+					UpdateAvailable: false,
+					CanUpdate:       false,
 				},
 			},
 		})
@@ -174,38 +174,38 @@ func TestRequestPluginUpdate_DirectEndpoint(t *testing.T) {
 			t.Fatalf("unexpected method: %s", r.Method)
 		}
 
-		var body map[string]any
+		var body pluginUpdateRequestBody
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
-		if body["license_key"] != "LIC-1" {
-			t.Fatalf("unexpected license key: %v", body["license_key"])
+		if body.LicenseKey != "LIC-1" {
+			t.Fatalf("unexpected license key: %v", body.LicenseKey)
 		}
-		if body["project_slug"] != "myproj" {
-			t.Fatalf("unexpected project slug: %v", body["project_slug"])
+		if body.ProjectSlug != "myproj" {
+			t.Fatalf("unexpected project slug: %v", body.ProjectSlug)
 		}
-		if body["machine_id"] == "" {
+		if body.MachineID == "" {
 			t.Fatalf("missing machine_id")
 		}
-		if body["version"] != "2.0.0" {
-			t.Fatalf("unexpected version: %v", body["version"])
+		if body.Version != "2.0.0" {
+			t.Fatalf("unexpected version: %v", body.Version)
 		}
-		if body["os"] != "linux" || body["arch"] != "amd64" {
-			t.Fatalf("unexpected platform: os=%v arch=%v", body["os"], body["arch"])
+		if body.OS != "linux" || body.Arch != "amd64" {
+			t.Fatalf("unexpected platform: os=%v arch=%v", body.OS, body.Arch)
 		}
 
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"message":          "ready",
-			"plugin":           "admin-frontend",
-			"current_version":  currentVersion,
-			"target_version":   "2.0.0",
-			"update_available": true,
-			"download_url":     "/api/v1/update/fetch/token-1?machine_id=machine-1",
-			"sha256":           "abc",
-			"signature":        "sig",
-			"size_bytes":       123,
-			"release_notes":    releaseNotes,
-			"expires_in":       300,
+		_ = json.NewEncoder(w).Encode(PluginUpdatePackage{
+			Message:         "ready",
+			Plugin:          "admin-frontend",
+			CurrentVersion:  testString(currentVersion),
+			TargetVersion:   "2.0.0",
+			UpdateAvailable: true,
+			DownloadURL:     "/api/v1/update/fetch/token-1?machine_id=machine-1",
+			SHA256:          "abc",
+			Signature:       "sig",
+			SizeBytes:       123,
+			ReleaseNotes:    testString(releaseNotes),
+			ExpiresIn:       300,
 		})
 	}))
 	defer srv.Close()
@@ -263,37 +263,41 @@ func TestUpdatePlugin_FrontendSuccess(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/plugins/catalog":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"project_slug":  "myproj",
-				"machine_id":    "machine-1",
-				"source_os":     "linux",
-				"source_arch":   "amd64",
-				"update_frozen": false,
-				"plugins": []map[string]any{
+			_ = json.NewEncoder(w).Encode(PluginCatalog{
+				ProjectSlug:  "myproj",
+				MachineID:    "machine-1",
+				SourceOS:     "linux",
+				SourceArch:   "amd64",
+				UpdateFrozen: false,
+				Plugins: []PluginInfo{
 					{
-						"slug":              "admin-frontend",
-						"name":              "Admin Frontend",
-						"type":              "frontend",
-						"ota_enabled":       true,
-						"installed_version": "1.0.0",
-						"latest_version":    "2.0.0",
-						"update_available":  true,
-						"can_update":        true,
+						Slug:             "admin-frontend",
+						Name:             "Admin Frontend",
+						Type:             "frontend",
+						OTAEnabled:       true,
+						InstalledVersion: testString("1.0.0"),
+						LatestVersion:    testString("2.0.0"),
+						UpdateAvailable:  true,
+						CanUpdate:        true,
 					},
 				},
 			})
 		case "/api/v1/update/download":
-			var body map[string]any
+			var body downloadMetaRequestBody
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatalf("decode download body: %v", err)
 			}
-			if body["os"] != "linux" || body["arch"] != "amd64" {
-				t.Fatalf("unexpected download platform: os=%v arch=%v", body["os"], body["arch"])
+			if body.OS != "linux" || body.Arch != "amd64" {
+				t.Fatalf("unexpected download platform: os=%v arch=%v", body.OS, body.Arch)
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"download_url": "/api/v1/update/fetch/token-1",
-				"sha256":       hashHex,
-				"signature":    signature,
+			_ = json.NewEncoder(w).Encode(struct {
+				DownloadURL string `json:"download_url"`
+				SHA256      string `json:"sha256"`
+				Signature   string `json:"signature"`
+			}{
+				DownloadURL: "/api/v1/update/fetch/token-1",
+				SHA256:      hashHex,
+				Signature:   signature,
 			})
 		case "/api/v1/update/fetch/token-1":
 			w.WriteHeader(http.StatusOK)
@@ -352,13 +356,13 @@ func TestUpdatePlugin_ErrorCases(t *testing.T) {
 
 	t.Run("frozen", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"project_slug":  "myproj",
-				"machine_id":    "machine-1",
-				"source_os":     "linux",
-				"source_arch":   "amd64",
-				"update_frozen": true,
-				"plugins":       []map[string]any{},
+			_ = json.NewEncoder(w).Encode(PluginCatalog{
+				ProjectSlug:  "myproj",
+				MachineID:    "machine-1",
+				SourceOS:     "linux",
+				SourceArch:   "amd64",
+				UpdateFrozen: true,
+				Plugins:      []PluginInfo{},
 			})
 		}))
 		defer srv.Close()
@@ -374,7 +378,7 @@ func TestUpdatePlugin_ErrorCases(t *testing.T) {
 			t.Fatalf("new guard: %v", err)
 		}
 
-		err = g.UpdatePlugin(context.Background(), "any")
+		err = g.UpdatePlugin(context.Background(), "missing-plugin")
 		if err != ErrUpdateFrozen {
 			t.Fatalf("expected ErrUpdateFrozen, got %v", err)
 		}
@@ -382,21 +386,21 @@ func TestUpdatePlugin_ErrorCases(t *testing.T) {
 
 	t.Run("not_managed", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"project_slug":  "myproj",
-				"machine_id":    "machine-1",
-				"source_os":     "linux",
-				"source_arch":   "amd64",
-				"update_frozen": false,
-				"plugins": []map[string]any{
+			_ = json.NewEncoder(w).Encode(PluginCatalog{
+				ProjectSlug:  "myproj",
+				MachineID:    "machine-1",
+				SourceOS:     "linux",
+				SourceArch:   "amd64",
+				UpdateFrozen: false,
+				Plugins: []PluginInfo{
 					{
-						"slug":             "unmanaged-plugin",
-						"name":             "Unmanaged",
-						"type":             "frontend",
-						"ota_enabled":      true,
-						"latest_version":   "1.0.1",
-						"update_available": true,
-						"can_update":       true,
+						Slug:            "unmanaged-plugin",
+						Name:            "Unmanaged",
+						Type:            "frontend",
+						OTAEnabled:      true,
+						LatestVersion:   testString("1.0.1"),
+						UpdateAvailable: true,
+						CanUpdate:       true,
 					},
 				},
 			})
